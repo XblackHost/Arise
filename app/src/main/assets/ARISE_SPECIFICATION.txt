@@ -1,0 +1,80 @@
+ARISE — Complete AI App Development Prompt
+
+Build a Real-Life Progression RPG With AI, Fitness, Exploration, and Fantasy RPG Mechanics
+
+---
+
+YOUR ROLE
+
+Act as an expert game designer, mobile app developer, full-stack engineer, UI/UX designer, AI engineer, database architect, and systems designer.
+
+Your task is to design, plan, and build a complete application called ARISE, a real-life progression RPG that combines personal development, fitness, AI-powered coaching, real-world exploration, fantasy RPG mechanics, multiplayer gameplay, and a deep character progression system.
+
+Do not treat this as a simple fitness app or a basic task manager. ARISE should feel like a living RPG where users improve their real lives while progressing through an immersive game world.
+
+Take creative freedom to expand the concept with original features, mechanics, systems, and content that fit the vision.
+
+Keep every major feature described in this document in the overall development plan. Decide the most practical implementation order, but do not silently remove complex features.
+
+Build a functional application rather than delivering only a concept, mockup, or static UI. If a feature requires external services, additional infrastructure, or future development, explain the requirements and provide a realistic implementation plan.
+
+---
+
+1. CORE VISION
+
+ARISE is a real-life RPG in which users become the main character of their own progression journey.
+
+The app combines:
+
+- Daily real-life missions and quests.
+- Personalized fitness and exercise plans.
+- Walking, running, and real-world exploration.
+- AI-powered personal coaching and companionship.
+- Character levels, attributes, skills, and abilities.
+- Classes, subclasses, weapons, armor, and equipment.
+- Boss battles, dungeons, and a recruitable Shadow Army.
+- Personality development and self-improvement.
+- Task management, reminders, and scheduling.
+- Multiplayer missions, dungeons, battles, and cooperative progression.
+- Offline gameplay through downloadable maps and content.
+- A practical mission verification system.
+- A fair accountability and consequence system.
+- A rewarding progression system that makes everyday improvement feel like an RPG.
+
+The central idea is simple:
+
+Real-life actions fuel in-game progression, while in-game progression motivates users to keep growing in real life.
+
+---
+
+2. APP IDENTITY AND VISUAL DESIGN
+
+Dark cinematic fantasy RPG aesthetic:
+- Deep black and dark gray backgrounds.
+- Glowing blue, violet, and magical accent colors.
+- Atmospheric lighting and subtle particle effects.
+- Animated level-ups and skill unlocks.
+- Stylish character profiles and status screens.
+- Fantasy-inspired weapons, armor, bosses, and abilities.
+- Immersive map exploration and dungeon interfaces.
+- Clean, modern mobile navigation.
+
+Main navigation:
+1. Home / System Dashboard
+2. Missions / Quests
+3. Character / Status
+4. Classes / Skills
+5. Shadow Army
+6. World Map / Exploration
+7. Inventory / Equipment
+8. AI Companion
+9. Social / Multiplayer
+10. Profile / Settings
+
+---
+
+3. USER ONBOARDING AND FIRST-LAUNCH API KEY SETUP
+
+On first launch, ARISE requests the user's Gemini API Key to power the NYX AI companion, personalized dynamic quest generation, and tactical boss strategies.
+The key is stored securely in local encrypted storage. Users can also configure, test, or update their key anytime in Settings.
+A comprehensive player onboarding quiz sets player goals, fitness capability, playstyle, and recommends their starting Hunter Class and initial questline.

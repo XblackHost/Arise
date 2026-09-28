@@ -1,0 +1,678 @@
+ARISE — Complete AI App Development Prompt
+
+Build a Real-Life Progression RPG With AI, Fitness, Exploration, and Fantasy RPG Mechanics
+
+---
+
+YOUR ROLE
+
+Act as an expert game designer, mobile app developer, full-stack engineer, UI/UX designer, AI engineer, database architect, and systems designer.
+
+Your task is to design, plan, and build a complete application called ARISE, a real-life progression RPG that combines personal development, fitness, AI-powered coaching, real-world exploration, fantasy RPG mechanics, multiplayer gameplay, and a deep character progression system.
+
+Do not treat this as a simple fitness app or a basic task manager. ARISE should feel like a living RPG where users improve their real lives while progressing through an immersive game world.
+
+Take creative freedom to expand the concept with original features, mechanics, systems, and content that fit the vision.
+
+Keep every major feature described in this document in the overall development plan. Decide the most practical implementation order, but do not silently remove complex features.
+
+Build a functional application rather than delivering only a concept, mockup, or static UI. If a feature requires external services, additional infrastructure, or future development, explain the requirements and provide a realistic implementation plan.
+
+---
+
+1. CORE VISION
+
+ARISE is a real-life RPG in which users become the main character of their own progression journey.
+
+The app combines:
+
+- Daily real-life missions and quests.
+- Personalized fitness and exercise plans.
+- Walking, running, and real-world exploration.
+- AI-powered personal coaching and companionship.
+- Character levels, attributes, skills, and abilities.
+- Classes, subclasses, weapons, armor, and equipment.
+- Boss battles, dungeons, and a recruitable Shadow Army.
+- Personality development and self-improvement.
+- Task management, reminders, and scheduling.
+- Multiplayer missions, dungeons, battles, and cooperative progression.
+- Offline gameplay through downloadable maps and content.
+- A practical mission verification system.
+- A fair accountability and consequence system.
+- A rewarding progression system that makes everyday improvement feel like an RPG.
+
+The central idea is simple:
+
+Real-life actions fuel in-game progression, while in-game progression motivates users to keep growing in real life.
+
+---
+
+2. APP IDENTITY AND VISUAL DESIGN
+
+Create a distinctive identity for ARISE.
+
+Visual direction
+
+Use a dark, cinematic fantasy RPG aesthetic with:
+
+- Deep black and dark gray backgrounds.
+- Glowing blue, violet, and other magical accent colors.
+- Atmospheric lighting and subtle particle effects.
+- Animated level-ups and skill unlocks.
+- Stylish character profiles and status screens.
+- Fantasy-inspired weapons, armor, bosses, and abilities.
+- Immersive map exploration and dungeon interfaces.
+- Clean, modern mobile navigation.
+
+The interface should feel like a futuristic RPG system rather than a traditional fitness application.
+
+Create an original visual identity. Use dark fantasy and character-progression aesthetics as inspiration without copying another game's characters, artwork, names, or interface.
+
+Main navigation
+
+Design a clear navigation system with sections such as:
+
+1. Home / System Dashboard
+2. Missions / Quests
+3. Character / Status
+4. Classes / Skills
+5. Shadow Army
+6. World Map / Exploration
+7. Inventory / Equipment
+8. AI Companion
+9. Social / Multiplayer
+10. Profile / Settings
+
+You may reorganize the navigation if a better user experience is possible.
+
+---
+
+3. USER ONBOARDING AND PERSONALIZATION
+
+Create a detailed onboarding experience that builds a personalized player profile.
+
+Ask the user for information such as:
+
+- Name or chosen player identity.
+- Age range.
+- Height and weight, if they choose to provide them.
+- Fitness experience and current activity level.
+- Personal goals.
+- Preferred activities and interests.
+- Available equipment.
+- Time available each day.
+- Preferred difficulty level.
+- Sleep and daily routine preferences.
+- Accessibility needs and relevant exercise limitations.
+- Preferred learning style.
+- Personality and self-development goals.
+- Preferred fantasy RPG playstyle.
+
+Allow users to skip optional questions and change their information later.
+
+Use the information to personalize missions, training plans, recommendations, and progression.
+
+Do not make height or weight the sole basis for exercise recommendations. Prioritize age-appropriate, safe, sustainable, and individually adaptable activities.
+
+Player profile creation
+
+After onboarding, generate a personalized player profile containing:
+
+- Starting level.
+- Character attributes.
+- Recommended class options.
+- Initial missions.
+- Suggested skills.
+- Personal development goals.
+- Recommended activity schedule.
+- Initial equipment and rewards.
+- A personalized introduction from the AI companion.
+
+Let users customize their player name, avatar, appearance, and preferred experience.
+
+---
+
+4. CHARACTER STATUS AND PROGRESSION SYSTEM
+
+Build a detailed RPG character status system.
+
+Core attributes
+
+Create a balanced attribute system that may include:
+
+- Strength
+- Endurance
+- Agility
+- Intelligence
+- Focus
+- Discipline
+- Vitality
+- Awareness
+- Creativity
+- Social Confidence
+- Resilience
+- Adaptability
+
+Each attribute should have a clear purpose and connect to relevant gameplay mechanics.
+
+For example:
+
+- Strength can influence strength-oriented class progression.
+- Endurance can influence stamina-related gameplay.
+- Intelligence can support strategy and knowledge-based challenges.
+- Focus can support concentration and skill progression.
+- Agility can support movement-oriented abilities.
+- Creativity can unlock creative challenges and special rewards.
+
+Avoid turning real-world personal traits into rigid judgments about a person's worth.
+
+Leveling
+
+Implement a complete leveling system with:
+
+- Character XP.
+- Level requirements.
+- Level-up animations.
+- Attribute progression.
+- Unlockable abilities.
+- Class-specific advancement.
+- Milestones and achievements.
+- Daily and weekly progression.
+- Long-term ranks and titles.
+
+Include a progression curve that remains rewarding over time without requiring excessive grinding.
+
+Multiple progression tracks
+
+Create separate progression tracks for:
+
+- Overall character level.
+- Class mastery.
+- Individual skill mastery.
+- Fitness-related progress.
+- Knowledge and learning.
+- Personal development.
+- Exploration.
+- Shadow Army progression.
+
+Allow progress in one area to contribute to the overall character journey without forcing users to participate in every activity.
+
+---
+
+5. DAILY MISSIONS AND QUEST SYSTEM
+
+Create a dynamic mission system that generates personalized daily, weekly, and long-term objectives.
+
+Mission categories
+
+Fitness missions
+
+- Push-ups and other appropriate bodyweight exercises.
+- Squats and mobility exercises.
+- Walking and running.
+- Stretching and recovery.
+- Personalized exercise routines.
+
+Productivity missions
+
+- Complete a study session.
+- Finish an important task.
+- Organize a workspace.
+- Follow a planned schedule.
+- Work toward a personal project.
+
+Learning missions
+
+- Read a chapter.
+- Learn a new concept.
+- Practice a language.
+- Complete a lesson.
+- Develop a new skill.
+
+Personal development missions
+
+- Practice communication.
+- Build confidence through manageable challenges.
+- Develop consistency.
+- Practice mindfulness.
+- Reflect on personal goals.
+
+Exploration missions
+
+- Walk a new route.
+- Visit a designated safe public area.
+- Discover a new map location.
+- Explore a virtual dungeon.
+- Complete location-based objectives.
+
+Class-specific missions
+
+- Missions designed around the user's selected class.
+- Skill practice and class mastery challenges.
+- Special class quests.
+- Class-specific achievements.
+
+Mission structure
+
+Each mission should include:
+
+- Mission title.
+- Description.
+- Category.
+- Difficulty.
+- Estimated duration.
+- Objectives.
+- Recommended time.
+- XP reward.
+- Currency or item rewards.
+- Relevant attribute progression.
+- Possible skill unlocks.
+- Optional bonus objectives.
+- Completion status.
+- Verification method, if applicable.
+- Consequence rules, if applicable.
+
+Provide multiple difficulty levels, including beginner, intermediate, advanced, and customizable difficulty.
+
+Let users create their own missions and tasks.
+
+Allow users to edit, reschedule, skip, or replace missions under reasonable rules without losing their overall progression.
+
+Dynamic mission generation
+
+The AI should generate new missions based on:
+
+- Player level.
+- Selected class.
+- Current goals.
+- Available time.
+- Recent activity.
+- Skill progression.
+- Preferred mission categories.
+- Difficulty preferences.
+- Long-term objectives.
+
+Avoid repetitive missions by using mission templates, procedural variation, and contextual personalization.
+
+---
+
+6. MISSION VERIFICATION AND PROOF SYSTEM
+
+Create a minimal, practical, and privacy-conscious verification system that helps establish whether a user has completed a mission.
+
+The system should not make the app feel like surveillance software or require complicated verification for every task.
+
+Verification methods
+
+Use different verification methods depending on the mission type.
+
+1. Self-confirmation
+
+For simple tasks such as reading, studying, organizing, or completing personal activities, allow the user to mark the mission as completed.
+
+2. Timer-based verification
+
+For activities such as studying, reading, stretching, or other timed tasks, provide an optional in-app timer.
+
+3. Device activity data
+
+Where supported and authorized, use device features to estimate or record:
+
+- Steps.
+- Walking distance.
+- Running distance.
+- Activity duration.
+- GPS-based routes.
+
+4. Optional proof submission
+
+For selected missions, allow users to submit a simple photo, note, or other appropriate evidence.
+
+Keep this optional unless the specific mission genuinely requires it.
+
+5. In-app activity tracking
+
+Use app interactions, timers, and recorded activity data to support mission completion.
+
+Verification rules
+
+- Use the least intrusive method that reasonably fits the mission.
+- Do not require camera access, GPS, or health data for unrelated tasks.
+- Do not claim that a mission has been independently verified when it has only been self-reported.
+- Clearly distinguish between self-reported, device-recorded, and otherwise verified completion.
+- Allow users to complete missions that do not support automatic verification.
+- Keep the system functional offline wherever possible.
+- Do not require continuous background monitoring.
+- Allow users to control permissions and review recorded data.
+
+Verification limitations
+
+Explain that device activity and automated signals are estimates and may not prove that every exercise was performed correctly.
+
+Do not introduce invasive biometric monitoring or complex identity verification.
+
+---
+
+7. ACCOUNTABILITY AND PUNISHMENT SYSTEM
+
+Create a fair, practical, and configurable accountability system that gives missions meaningful consequences when users repeatedly miss commitments.
+
+The purpose is to encourage consistency and responsibility while keeping the experience enjoyable.
+
+The system must never become excessively harsh, humiliating, or damaging to a user's real-life well-being.
+
+Accountability mechanics
+
+Include:
+
+- Optional mission deadlines.
+- Mission expiration rules.
+- Streak tracking.
+- Grace periods.
+- Flexible rescheduling.
+- Recovery missions.
+- Small in-game penalties for selected missed commitments.
+- Temporary loss of optional bonuses.
+- Accountability settings.
+- A history of completed and missed missions.
+
+Example consequences
+
+Depending on the mission and the user's settings, reasonable consequences may include:
+
+- Losing a small portion of the bonus XP attached to a missed optional challenge.
+- Losing a temporary streak bonus while retaining previously earned rewards.
+- Having a time-limited mission expire without its completion reward.
+- Receiving a recovery mission to rebuild a streak.
+- Temporarily losing access to a special optional challenge until the user resumes normal progression.
+
+Rules for fairness
+
+1. Never remove large amounts of previously earned XP.
+2. Never permanently destroy equipment, skills, or Shadow Army recruits because a user missed a real-life task.
+3. Never impose exercise as punishment.
+4. Never penalize users for illness, injury, emergencies, accessibility needs, or legitimate schedule changes.
+5. Allow users to pause missions and adjust difficulty.
+6. Make consequences predictable and visible before a user accepts a mission.
+7. Provide grace periods and reasonable recovery options.
+8. Make accountability optional or adjustable.
+9. Avoid punishing users for missing missions they did not voluntarily accept.
+10. Keep penalties small, reversible where practical, and focused on in-game bonuses rather than real-life consequences.
+
+Recovery system
+
+Allow users to recover from missed missions through:
+
+- Rescheduling.
+- Replacing a mission with a suitable alternative.
+- Completing a recovery objective.
+- Using an optional grace period.
+- Adjusting future mission difficulty.
+
+The system should support long-term consistency rather than perfection.
+
+---
+
+8. REWARD AND ACHIEVEMENT SYSTEM
+
+Create a rewarding system that makes completing real-life missions feel meaningful.
+
+Reward types
+
+Include:
+
+- XP.
+- In-game currency.
+- Skill points.
+- Equipment.
+- Weapons.
+- Armor.
+- Cosmetic items.
+- Titles.
+- Achievements.
+- Character customization options.
+- Shadow Army recruits.
+- Class-specific rewards.
+- Rare collectibles.
+- Dungeon keys.
+- Crafting materials.
+
+Example
+
+A user completes a personalized exercise mission.
+
+The app grants XP, advances a relevant progression track, and may unlock a reward such as a new skill, cosmetic item, or equipment piece.
+
+A player completing a study mission may gain Intelligence-related progression and unlock knowledge-themed rewards.
+
+A player completing a walking mission may earn exploration XP, discover map locations, and encounter special events.
+
+Reward balancing
+
+Build a reward economy that:
+
+- Keeps all classes equally viable.
+- Supports different playstyles.
+- Makes small achievements meaningful.
+- Rewards consistency without demanding perfection.
+- Prevents one mission category from becoming the only useful way to progress.
+- Supports long-term goals and milestone rewards.
+
+Do not make rewards dependent on punishing missed missions.
+
+---
+
+9. CLASS SYSTEM — COMPLETE CLASS LIBRARY
+
+Create a comprehensive class system with distinct identities, playstyles, skills, equipment, progression paths, and weaknesses.
+
+Classes should feel different without making any class objectively inferior.
+
+Every class must be viable in solo gameplay, cooperative missions, exploration, and appropriate multiplayer activities.
+
+Use a combination of active skills, passive abilities, ultimate abilities, class quests, and specialization paths.
+
+Allow users to choose a class during onboarding or unlock classes through progression.
+
+Support class changes, secondary classes, and class mastery where appropriate.
+
+Each class must have:
+
+1. Class name and identity.
+2. Lore and fantasy theme.
+3. Core attributes.
+4. Primary playstyle.
+5. Passive abilities.
+6. Active skills.
+7. Ultimate ability.
+8. Special mechanics.
+9. Class-specific missions.
+10. Class-specific rewards.
+11. Weapons and armor preferences.
+12. Strengths and weaknesses.
+13. Solo and multiplayer roles.
+14. Progression and specialization paths.
+15. Class mastery challenges.
+
+Create a detailed class catalog that includes, at minimum, the following archetypes:
+A. Combat and frontline classes:
+1. Warrior
+2. Berserker
+3. Guardian
+4. Knight
+5. Paladin
+6. Duelist
+7. Gladiator
+8. Lancer
+
+B. Stealth and agility classes:
+9. Assassin
+10. Shadowblade
+11. Rogue
+12. Ranger
+13. Ninja
+14. Phantom
+
+C. Magic and elemental classes:
+15. Mage
+16. Archmage
+17. Elementalist
+18. Pyromancer
+19. Cryomancer
+20. Stormcaller
+21. Geomancer
+22. Chronomancer
+23. Gravity Weaver
+24. Void Mage
+
+D. Summoner and companion classes:
+25. Summoner
+26. Necromancer
+27. Shadow Monarch
+28. Beastmaster
+29. Spirit Caller
+30. Puppet Master
+
+E. Support and tactical classes:
+31. Healer
+32. Cleric
+33. Bard
+34. Tactician
+35. Alchemist
+36. Engineer
+37. Artificer
+
+F. Hybrid and specialized classes:
+38. Spellblade
+39. Battlemage
+40. Monk
+41. Warden
+42. Reaper
+43. Dragon Knight
+44. Rune Knight
+45. Arcane Archer
+46. Chrono Knight
+47. Soulbound
+48. Dreamweaver
+49. Adventurer
+
+---
+
+10. SKILL AND ABILITY SYSTEM
+
+Build a deep skill system with active combat skills, passive skills, movement skills, defensive skills, support skills, summoning skills, elemental skills, and ultimate abilities.
+
+---
+
+11. WEAPONS, ARMOR, AND EQUIPMENT
+
+Equipment categories: Swords, Daggers, Greatswords, Spears, Bows, Staves, Wands, Shields, Gauntlets, Magical weapons, Shadow weapons, Helmets, Chest armor, Gloves, Boots, Accessories, Rings, Amulets, Cloaks, Special artifacts.
+Rarity tiers: Common, Uncommon, Rare, Epic, Legendary, Mythic, Unique.
+
+---
+
+12. REAL-WORLD MAP AND EXPLORATION SYSTEM
+
+Real-world map view, player location with permission, walking and running routes, exploration zones, virtual quest locations, dungeon entrances, boss encounter areas, collectible locations, discovery rewards. Supports offline map cache and route recording.
+
+---
+
+13. WALKING, RUNNING, AND MOVEMENT TRACKING
+
+Distance, duration, pace, steps, activity history. Integrates real-life movement with in-game XP, endurance stat advancement, dungeon discovery, and boss triggers.
+
+---
+
+14. BOSS BATTLES AND SHADOW ARMY SYSTEM
+
+Encounter bosses (Common, Elite, Dungeon, Regional, Legendary, Mythic, Secret). Engage in tactical RPG combat with skill loadouts and timing. Defeat bosses to trigger the "ARISE" shadow extraction ritual! Recruit defeated bosses into your Shadow Army roster, summon them into battle, and level them up!
+
+---
+
+15. DUNGEON SYSTEM
+
+Solo dungeons, cooperative dungeons, shadow dungeons, endless tower challenges, puzzle trials, and boss rushes with tiered difficulty and rich loot.
+
+---
+
+16. AI COMPANION SYSTEM (NYX)
+
+Personal RPG System Guide, Assistant, and Coach. Natural chat, context-aware progression analysis, personalized mission generation, boss strategies, build recommendations, and motivational status reports powered by Gemini AI.
+
+---
+
+17. TASK MANAGER AND SMART REMINDERS
+
+Task organization, priority flags, deadlines, recurring routines, and conversion of real-life chores/work into RPG quest rewards.
+
+---
+
+18. PERSONALITY AND CHARACTER DEVELOPMENT
+
+Self-reflection questionnaires, confidence, communication, discipline, focus, and creativity growth tracks with safe, encouraging micro-challenges.
+
+---
+
+19. MULTIPLAYER SYSTEM
+
+Co-op dungeons, boss raids, friend battles, guilds, shared achievements, and party synergies.
+
+---
+
+20. ONLINE AND LAN / WI-FI MULTIPLAYER
+
+Local network and online party discovery, cooperative encounters, and synchronization.
+
+---
+
+21. FRIENDS, SOCIAL FEATURES, AND COMMUNITY
+
+Friend lists, player cards, class showcases, shadow army showcases, and privacy controls.
+
+---
+
+22. ECONOMY, CRAFTING, AND ITEM COLLECTION
+
+Gold and Mana Crystals, crafting forge, gear upgrades, dismantle systems, and treasure troves.
+
+---
+
+23. ACHIEVEMENTS, RANKS, AND SEASONS
+
+Rank tiers from E-Rank Hunter to Monarch / National Level, milestone achievements, and seasonal challenges.
+
+---
+
+24. STORY, LORE, AND WORLD-BUILDING
+
+"The Awakening" lore, dungeon outbreaks, monarch legacy, system notifications, and evolving story chapters.
+
+---
+
+25. HOME DASHBOARD AND PLAYER EXPERIENCE
+
+Cinematic status HUD, active daily missions, NYX companion dialog, quick workout/walk triggers, and shadow army overview.
+
+---
+
+26. NOTIFICATIONS AND PROGRESSION FEEDBACK
+
+Level-up fanfare, skill unlocks, ARISE recruitment ceremonies, and milestone celebrations.
+
+---
+
+27. ACCESSIBILITY, SAFETY, AND USER WELL-BEING
+
+Adaptive difficulty, indoor/accessible workout substitutes, flexible accountability without harsh penalties.
+
+---
+
+28. TECHNICAL ARCHITECTURE
+
+Jetpack Compose UI, Room Database persistence, Encrypted local storage for Gemini API Key, Gemini REST integration with direct streaming/structured prompt execution, offline-first operation.
+
+---
+
+29. SECURITY, PRIVACY, AND DATA MANAGEMENT
+
+Local storage of API keys on device, zero remote transmission of personal data except direct Gemini AI calls using user's explicit key.
