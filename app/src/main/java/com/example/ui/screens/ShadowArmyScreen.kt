@@ -152,17 +152,25 @@ fun ShadowArmyScreen(
             }
         } else {
             items(shadows) { unit ->
-                ShadowCard(unit = unit)
+                ShadowCard(
+                    unit = unit,
+                    onToggleDeploy = { viewModel.toggleDeployShadow(unit.id) },
+                    onUpgrade = { viewModel.upgradeShadow(unit.id) }
+                )
             }
         }
     }
 }
 
 @Composable
-fun ShadowCard(unit: ShadowUnit) {
+fun ShadowCard(
+    unit: ShadowUnit,
+    onToggleDeploy: () -> Unit,
+    onUpgrade: () -> Unit
+) {
     NeonCard(
-        borderColor = AriseShadowViolet,
-        backgroundColor = Color(0xFF110E1F),
+        borderColor = if (unit.isDeployed) AriseShadowViolet else Color(0xFF374151),
+        backgroundColor = if (unit.isDeployed) Color(0xFF140E26) else Color(0xFF0F111A),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -172,6 +180,8 @@ fun ShadowCard(unit: ShadowUnit) {
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = unit.iconEmoji, fontSize = 20.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = unit.name,
                         color = AriseTextPrimary,
@@ -200,12 +210,59 @@ fun ShadowCard(unit: ShadowUnit) {
                     fontWeight = FontWeight.SemiBold
                 )
             }
-            Text(
-                text = "Lv.${unit.level}",
-                color = AriseCyanNeon,
-                fontWeight = FontWeight.Black,
-                fontSize = 14.sp
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "Lv.${unit.level}",
+                    color = AriseCyanNeon,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 15.sp
+                )
+                if (unit.isDeployed) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFF065F46))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "⚔️ DEPLOYED",
+                            color = Color(0xFF6EE7B7),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Scaling & Origin Badge
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0xFF1E1538))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "⚖️ Scaled from Origin: ${unit.originRank}",
+                    color = Color(0xFFD8B4FE),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "MP Respawn: ${unit.mpUpkeepCost} MP",
+                    color = AriseGoldRank,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -220,12 +277,12 @@ fun ShadowCard(unit: ShadowUnit) {
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("⚔️ ATK ${unit.attackPower}", color = AriseCyanNeon, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Text("🛡️ DEF ${unit.defense}", color = AriseEmeraldHeal, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Text("💨 SPD ${unit.speed}", color = AriseGoldRank, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Text("❤️ Loyalty ${unit.loyalty}%", color = AriseShadowViolet, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("❤️ HP ${unit.maxHp}", color = AriseEmeraldHeal, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text("⚔️ ATK ${unit.attackPower}", color = AriseCyanNeon, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text("🛡️ DEF ${unit.defense}", color = Color(0xFF93C5FD), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text("💨 SPD ${unit.speed}", color = AriseGoldRank, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -233,14 +290,54 @@ fun ShadowCard(unit: ShadowUnit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
-                .background(Color(0xFF1E1538))
+                .background(Color(0xFF1B1430))
                 .padding(8.dp)
         ) {
             Text(
                 text = "Signature: ${unit.signatureSkill} — ${unit.skillDescription}",
-                color = Color(0xFFD8B4FE),
+                color = Color(0xFFE9D5FF),
                 fontSize = 11.sp
             )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Actions: Deploy to Raid Squad & Ascend
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onToggleDeploy,
+                modifier = Modifier.weight(1f).height(38.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (unit.isDeployed) Color(0xFF3B185F) else Color(0xFF1E293B)
+                ),
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Text(
+                    text = if (unit.isDeployed) "⚔️ IN SQUADRON" else "➕ DEPLOY TO RAID",
+                    color = if (unit.isDeployed) AriseGoldRank else Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Button(
+                onClick = onUpgrade,
+                modifier = Modifier.weight(1f).height(38.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4C1D95)),
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Text(
+                    text = "⚡ ASCEND (+10% STATS)",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }

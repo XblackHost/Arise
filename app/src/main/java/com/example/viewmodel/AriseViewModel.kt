@@ -20,12 +20,29 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+data class ActiveBattleShadow(
+    val id: Long,
+    val name: String,
+    val title: String,
+    val rank: String,
+    val iconEmoji: String = "👥",
+    val currentHp: Int,
+    val maxHp: Int,
+    val attackPower: Int,
+    val defense: Int,
+    val signatureSkill: String,
+    val mpReconstituteCost: Int = 15,
+    val isAlive: Boolean = true,
+    val originRank: String = "E-Rank"
+)
+
 data class BattleState(
     val inBattle: Boolean = false,
     val currentBoss: DungeonBoss? = null,
     val bossCurrentHp: Int = 100,
     val playerCurrentHp: Int = 120,
     val playerCurrentMp: Int = 60,
+    val activeShadows: List<ActiveBattleShadow> = emptyList(),
     val logMessages: List<String> = emptyList(),
     val isVictory: Boolean = false,
     val isDefeat: Boolean = false,
@@ -286,21 +303,98 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ----------------------------------------------------
-    // SHADOW ARMY & DUNGEON COMBAT
+    // SHADOW ARMY & DUNGEON COMBAT WITH SCALING & MP RECONSTITUTION
     // ----------------------------------------------------
+
+    /**
+     * Dynamically scales extracted boss stats according to the Hunter's level and rank.
+     * Prevents high-tier (e.g. S-Rank) bosses from breaking balance when defeated by
+     * early-tier (e.g. E-Rank) hunters, while remaining remarkably powerful ("pretty OP but not broken").
+     */
+    fun calculateScaledShadowStats(
+        boss: DungeonBoss,
+        hunterMaxHp: Int,
+        hunterStrength: Int,
+        hunterEndurance: Int
+    ): ScaledShadowStats {
+        val bossRankWeight = when {
+            boss.rank.contains("Monarch", ignoreCase = true) || boss.rank.contains("S-Rank", ignoreCase = true) -> 1.95f
+            boss.rank.contains("A-Rank", ignoreCase = true) -> 1.65f
+            boss.rank.contains("B-Rank", ignoreCase = true) -> 1.45f
+            boss.rank.contains("C-Rank", ignoreCase = true) -> 1.30f
+            boss.rank.contains("D-Rank", ignoreCase = true) -> 1.18f
+            else -> 1.05f
+        }
+
+        val baseHunterAtk = (hunterStrength * 2.2f + 14f).coerceAtLeast(20f)
+        val baseHunterDef = (hunterEndurance * 1.5f + 10f).coerceAtLeast(14f)
+
+        val scaledMaxHp = (hunterMaxHp * bossRankWeight * 1.45f).toInt()
+        val scaledAtk = (baseHunterAtk * bossRankWeight * 1.38f).toInt().coerceAtLeast(28)
+        val scaledDef = (baseHunterDef * bossRankWeight * 1.25f).toInt().coerceAtLeast(16)
+        val mpReconstitutionCost = (12 + (bossRankWeight * 4.5f)).toInt()
+
+        return ScaledShadowStats(
+            maxHp = scaledMaxHp,
+            attack = scaledAtk,
+            defense = scaledDef,
+            mpReconstituteCost = mpReconstitutionCost,
+            weight = bossRankWeight
+        )
+    }
+
+    data class ScaledShadowStats(
+        val maxHp: Int,
+        val attack: Int,
+        val defense: Int,
+        val mpReconstituteCost: Int,
+        val weight: Float
+    )
 
     fun startBossBattle(boss: DungeonBoss) {
         val p = playerProfile.value
+        val deployedShadows = shadowArmy.value
+            .filter { it.isDeployed }
+            .take(3)
+            .ifEmpty { shadowArmy.value.take(3) }
+
+        val activeShadowsList = deployedShadows.map { shadow ->
+            ActiveBattleShadow(
+                id = shadow.id,
+                name = shadow.name,
+                title = shadow.title,
+                rank = shadow.rank,
+                iconEmoji = shadow.iconEmoji,
+                currentHp = shadow.maxHp,
+                maxHp = shadow.maxHp,
+                attackPower = shadow.attackPower,
+                defense = shadow.defense,
+                signatureSkill = shadow.signatureSkill,
+                mpReconstituteCost = shadow.mpUpkeepCost,
+                isAlive = true,
+                originRank = shadow.originRank
+            )
+        }
+
+        val initialLogs = mutableListOf(
+            "⚔️ Raid commenced! ${boss.name} (${boss.rank}) emerges with murderous intent!",
+            "Boss Weakness: ${boss.weakness}. Watch out for '${boss.bossSpecialAttackName}'!"
+        )
+
+        if (activeShadowsList.isNotEmpty()) {
+            initialLogs.add("👑 SHADOW SQUADRON DEPLOYED: [${activeShadowsList.joinToString { it.name }}] emerge from the dark mist to fight at your command!")
+        } else {
+            initialLogs.add("ℹ️ No shadows deployed. Slay this boss to extract its soul with 'ARISE'!")
+        }
+
         _battleState.value = BattleState(
             inBattle = true,
             currentBoss = boss,
             bossCurrentHp = boss.maxHp,
             playerCurrentHp = p?.maxHp ?: 120,
             playerCurrentMp = p?.maxMp ?: 60,
-            logMessages = listOf(
-                "⚔️ Encounter commenced! ${boss.name} (${boss.rank}) emerges with menacing intent!",
-                "Boss Weakness: ${boss.weakness}. Watch out for '${boss.bossSpecialAttackName}'!"
-            ),
+            activeShadows = activeShadowsList,
+            logMessages = initialLogs,
             isVictory = false,
             isDefeat = false,
             extractionEligible = false,
@@ -309,6 +403,35 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             isBossChargingUltimate = false,
             isPlayerDefending = false,
             healthPotionsRemaining = 2
+        )
+    }
+
+    /**
+     * Manually reconstitutes a fallen shadow in battle by spending Hunter's MP.
+     */
+    fun reconstituteShadowInBattle(shadowId: Long) {
+        val current = _battleState.value
+        if (!current.inBattle || current.isVictory || current.isDefeat) return
+
+        val shadow = current.activeShadows.find { it.id == shadowId } ?: return
+        if (shadow.isAlive) return
+
+        if (current.playerCurrentMp < shadow.mpReconstituteCost) {
+            _battleState.value = current.copy(
+                logMessages = current.logMessages + "⚠️ Insufficient MP! Needs ${shadow.mpReconstituteCost} MP to reconstitute ${shadow.name}."
+            )
+            return
+        }
+
+        val newMp = current.playerCurrentMp - shadow.mpReconstituteCost
+        val updatedShadows = current.activeShadows.map {
+            if (it.id == shadowId) it.copy(currentHp = it.maxHp, isAlive = true) else it
+        }
+
+        _battleState.value = current.copy(
+            playerCurrentMp = newMp,
+            activeShadows = updatedShadows,
+            logMessages = current.logMessages + "🌑 RECONSTITUTION: Hunter channeled ${shadow.mpReconstituteCost} MP! [${shadow.name}] rises from the abyss with full HP!"
         )
     }
 
@@ -327,6 +450,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         var playerMpAfterAction = current.playerCurrentMp
 
         val actionLogs = mutableListOf<String>()
+        val shadowList = current.activeShadows.toMutableList()
 
         when (actionType) {
             "HEAL" -> {
@@ -371,9 +495,18 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     return
                 }
                 playerMpAfterAction -= mpCost
-                val shadowPower = shadowArmy.value.sumOf { it.attackPower }
-                damageDealt = (shadowPower * 1.5 + profile.intelligence * 2.0 - boss.defense * 0.3).toInt().coerceAtLeast(45)
-                actionLogs.add("👑 Shadow Legion swarms the boss, tearing through defenses for $damageDealt damage!")
+
+                // Overcharged shadow assault + reconstitute 1 fallen shadow if any
+                val deadShadow = shadowList.indexOfFirst { !it.isAlive }
+                if (deadShadow != -1) {
+                    val revived = shadowList[deadShadow].copy(currentHp = shadowList[deadShadow].maxHp, isAlive = true)
+                    shadowList[deadShadow] = revived
+                    actionLogs.add("🌑 SOVEREIGN RECALL: [${revived.name}] was summoned back to life from the shadow realm!")
+                }
+
+                val aliveShadowPower = shadowList.filter { it.isAlive }.sumOf { it.attackPower }
+                damageDealt = (aliveShadowPower * 1.6 + profile.intelligence * 2.2 - boss.defense * 0.3).toInt().coerceAtLeast(50)
+                actionLogs.add("👑 SHADOW MONARCH OVERLOAD: Shadows converge into dark astral vortex dealing $damageDealt catastrophic damage!")
             }
             "ULTIMATE" -> {
                 mpCost = 40
@@ -389,16 +522,35 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        val newBossHp = (current.bossCurrentHp - damageDealt).coerceAtLeast(0)
+        // --- SHADOW SQUADRON ATTACK TURN ---
+        var totalShadowDmg = 0
+        shadowList.filter { it.isAlive }.forEach { shadow ->
+            val isSkill = (1..100).random() <= 40
+            val shadowDmg = if (isSkill) {
+                ((shadow.attackPower * 1.6f) - boss.defense * 0.25f).toInt().coerceAtLeast(18)
+            } else {
+                ((shadow.attackPower * 1.15f) - boss.defense * 0.3f).toInt().coerceAtLeast(12)
+            }
+            totalShadowDmg += shadowDmg
+            if (isSkill) {
+                actionLogs.add("👥 [${shadow.name}] executes '${shadow.signatureSkill}' for $shadowDmg damage!")
+            } else {
+                actionLogs.add("👥 [${shadow.name}] cleaves boss with dark daggers for $shadowDmg damage!")
+            }
+        }
+
+        val totalCombinedDamage = damageDealt + totalShadowDmg
+        val newBossHp = (current.bossCurrentHp - totalCombinedDamage).coerceAtLeast(0)
 
         // Check Boss Defeat
         if (newBossHp <= 0) {
             val victoryLogs = current.logMessages + actionLogs +
-                    "${boss.name} has fallen! A dark aura gathers... Extraction window is OPEN!"
+                    "${boss.name} has fallen! A dark aura gathers... Speak 'ARISE' to extract its soul!"
             _battleState.value = current.copy(
                 bossCurrentHp = 0,
                 playerCurrentHp = playerHpAfterHeal,
                 playerCurrentMp = playerMpAfterAction,
+                activeShadows = shadowList,
                 logMessages = victoryLogs,
                 isVictory = true,
                 extractionEligible = true,
@@ -412,48 +564,79 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         var isEnraged = current.isBossEnraged
         if (newBossHp <= (boss.maxHp * 0.35f) && !isEnraged) {
             isEnraged = true
-            actionLogs.add("⚠️ CRITICAL WARNING: ${boss.name} has ENTERED ENRAGED PHASE! Eyes gleam with crimson slaughter (+35% ATK)!")
+            actionLogs.add("⚠️ CRITICAL WARNING: ${boss.name} has ENTERED ENRAGED PHASE! (+35% ATK)!")
         }
 
-        // Boss Combat AI Turn
+        // --- BOSS COMBAT AI TURN ---
         val atkMultiplier = if (isEnraged) 1.35f else 1.0f
-        var rawBossDmg = 0
         var willChargeNext = false
 
-        if (current.isBossChargingUltimate) {
-            // Boss releases catastrophic ultimate!
-            rawBossDmg = (boss.attack * atkMultiplier * 2.2f - profile.endurance * 0.5f).toInt().coerceAtLeast(25)
-            actionLogs.add("🔴 CATACLYSM: ${boss.name} unleashes '${boss.bossSpecialAttackName}'!")
+        val aliveShadows = shadowList.filter { it.isAlive }
+        // 60% chance boss attacks an active shadow (drawing aggro), 40% chance it targets the hunter
+        val targetShadowIndex = if (aliveShadows.isNotEmpty() && (1..100).random() <= 60 && !current.isBossChargingUltimate) {
+            val chosen = aliveShadows.random()
+            shadowList.indexOfFirst { it.id == chosen.id }
         } else {
-            // Roll boss behavior: 25% chance to start charging ultimate, 75% standard or special hit
-            val roll = (1..100).random()
-            if (roll <= 25 && !isEnraged) {
-                willChargeNext = true
-                rawBossDmg = (boss.attack * atkMultiplier * 0.6f).toInt().coerceAtLeast(8)
-                actionLogs.add("⚠️ ALERT: ${boss.name} begins gathering catastrophic power for '${boss.bossSpecialAttackName}'! [PARRY/DEFEND] next turn!")
+            -1
+        }
+
+        if (targetShadowIndex != -1) {
+            // Boss attacks Shadow
+            val target = shadowList[targetShadowIndex]
+            val bossDmgToShadow = (boss.attack * atkMultiplier * 1.15f - target.defense * 0.35f).toInt().coerceAtLeast(16)
+            val newHp = target.currentHp - bossDmgToShadow
+
+            if (newHp <= 0) {
+                // Shadow destroyed! PASSIVE MP RECONSTITUTION CHECK
+                if (playerMpAfterAction >= target.mpReconstituteCost) {
+                    playerMpAfterAction -= target.mpReconstituteCost
+                    shadowList[targetShadowIndex] = target.copy(currentHp = target.maxHp, isAlive = true)
+                    actionLogs.add("💥 ${boss.name} delivered a fatal strike of $bossDmgToShadow damage to [${target.name}]!")
+                    actionLogs.add("🌑 PASSIVE RECONSTITUTION: [${target.name}] consumed ${target.mpReconstituteCost} MP from Hunter and immediately regenerated from the dark mist with full HP! 'ARISE!'")
+                } else {
+                    shadowList[targetShadowIndex] = target.copy(currentHp = 0, isAlive = false)
+                    actionLogs.add("💀 [${target.name}] was destroyed by $bossDmgToShadow damage! Hunter lacked ${target.mpReconstituteCost} MP to passively reconstitute it! Shadow is now dormant.")
+                }
             } else {
-                rawBossDmg = (boss.attack * atkMultiplier * 1.25f - profile.endurance * 0.45f).toInt().coerceAtLeast(14)
-                actionLogs.add("${boss.name} counterattacks with ferocious strikes for $rawBossDmg damage!")
+                shadowList[targetShadowIndex] = target.copy(currentHp = newHp)
+                actionLogs.add("🛡️ [${target.name}] tanks ${boss.name}'s blow, taking $bossDmgToShadow damage! (${newHp}/${target.maxHp} HP remaining)")
             }
-        }
-
-        // Apply Player Parry/Defend Damage Reduction
-        val finalBossDmg = if (playerDefendingThisTurn) {
-            val reduced = (rawBossDmg * 0.30f).toInt().coerceAtLeast(4)
-            actionLogs.add("🛡️ PARRY EFFECTIVE! Absorbed 70% damage, taking only $reduced damage!")
-            reduced
         } else {
-            rawBossDmg
+            // Boss attacks Hunter directly
+            var rawBossDmg = 0
+            if (current.isBossChargingUltimate) {
+                rawBossDmg = (boss.attack * atkMultiplier * 2.2f - profile.endurance * 0.5f).toInt().coerceAtLeast(25)
+                actionLogs.add("🔴 CATACLYSM: ${boss.name} unleashes '${boss.bossSpecialAttackName}' directly upon Hunter!")
+            } else {
+                val roll = (1..100).random()
+                if (roll <= 25 && !isEnraged) {
+                    willChargeNext = true
+                    rawBossDmg = (boss.attack * atkMultiplier * 0.6f).toInt().coerceAtLeast(8)
+                    actionLogs.add("⚠️ ALERT: ${boss.name} gathers catastrophic energy for '${boss.bossSpecialAttackName}'! [PARRY/DEFEND] next turn!")
+                } else {
+                    rawBossDmg = (boss.attack * atkMultiplier * 1.25f - profile.endurance * 0.45f).toInt().coerceAtLeast(14)
+                    actionLogs.add("${boss.name} strikes Hunter with ferocious assault for $rawBossDmg damage!")
+                }
+            }
+
+            val finalBossDmg = if (playerDefendingThisTurn) {
+                val reduced = (rawBossDmg * 0.30f).toInt().coerceAtLeast(4)
+                actionLogs.add("🛡️ PARRY EFFECTIVE! Absorbed 70% damage, taking only $reduced damage!")
+                reduced
+            } else {
+                rawBossDmg
+            }
+
+            playerHpAfterHeal = (playerHpAfterHeal - finalBossDmg).coerceAtLeast(0)
         }
 
-        val newPlayerHp = (playerHpAfterHeal - finalBossDmg).coerceAtLeast(0)
-
-        if (newPlayerHp <= 0) {
+        if (playerHpAfterHeal <= 0) {
             actionLogs.add("💀 Hunter was incapacitated by ${boss.name}! Gate collapse imminent!")
             _battleState.value = current.copy(
                 bossCurrentHp = newBossHp,
                 playerCurrentHp = 0,
                 playerCurrentMp = playerMpAfterAction,
+                activeShadows = shadowList,
                 logMessages = current.logMessages + actionLogs,
                 isDefeat = true,
                 isBossEnraged = isEnraged,
@@ -464,8 +647,9 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             _battleState.value = current.copy(
                 bossCurrentHp = newBossHp,
-                playerCurrentHp = newPlayerHp,
+                playerCurrentHp = playerHpAfterHeal,
                 playerCurrentMp = playerMpAfterAction,
+                activeShadows = shadowList,
                 logMessages = current.logMessages + actionLogs,
                 isBossEnraged = isEnraged,
                 isBossChargingUltimate = willChargeNext,
@@ -476,7 +660,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Executes the iconic "ARISE" extraction command.
+     * Executes the iconic "ARISE" extraction command with dynamic hunter scaling.
      */
     fun performAriseExtraction() {
         val state = _battleState.value
@@ -484,24 +668,36 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         if (!state.extractionEligible || state.isExtracted) return
 
         viewModelScope.launch(Dispatchers.IO) {
-            // Add shadow boss to Army
+            val p = db.playerDao().getPlayerProfileOnce()
+            val hunterLevel = p?.level ?: 1
+            val hunterMaxHp = p?.maxHp ?: 120
+            val hunterStr = p?.strength ?: 10
+            val hunterEnd = p?.endurance ?: 10
+
+            val scaled = calculateScaledShadowStats(boss, hunterMaxHp, hunterStr, hunterEnd)
+
             val newShadow = ShadowUnit(
                 name = boss.shadowUnitName,
                 title = boss.shadowUnitTitle,
                 rank = boss.shadowRank,
-                level = 1,
-                attackPower = boss.attack + 20,
-                defense = boss.defense + 10,
-                speed = 22,
+                level = hunterLevel,
+                maxHp = scaled.maxHp,
+                currentHp = scaled.maxHp,
+                attackPower = scaled.attack,
+                defense = scaled.defense,
+                speed = (20 * scaled.weight).toInt(),
                 loyalty = 100,
                 signatureSkill = boss.shadowSignatureSkill,
                 skillDescription = boss.shadowSkillDesc,
                 isSummoned = true,
-                lore = "Defeated in combat. Extracted through the supreme command 'ARISE'. Now loyally serves the Hunter."
+                isDeployed = true,
+                originRank = boss.rank,
+                mpUpkeepCost = scaled.mpReconstituteCost,
+                iconEmoji = boss.iconEmoji,
+                lore = "Defeated in battle. Extracted via 'ARISE'. Scaled to Hunter Rank (${p?.rank ?: "E-Rank"}) from origin ${boss.rank}. Loyally serves in the Undying Legion."
             )
             db.shadowDao().insertShadow(newShadow)
 
-            val p = db.playerDao().getPlayerProfileOnce()
             if (p != null) {
                 db.playerDao().updateProfile(
                     p.copy(
@@ -515,10 +711,65 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 isExtracted = true,
                 logMessages = state.logMessages +
                         "COMMAND UTTERED: 'ARISE!'" +
-                        "Shadow Extraction SUCCESSFUL! ${boss.shadowUnitName} has joined your Shadow Army!"
+                        "Shadow Extraction SUCCESSFUL! ${boss.shadowUnitName} has joined your Shadow Army!" +
+                        "⚖️ MONARCH CAPACITY SCALING: Scaled to ${p?.rank ?: "E-Rank"} (Original: ${boss.rank})! Max HP: ${scaled.maxHp} • ATK: ${scaled.attack} • DEF: ${scaled.defense} • Reconstitution: ${scaled.mpReconstituteCost} MP."
             )
 
-            _celebrationEvent.value = "SHADOW EXTRACTION: 'ARISE!' ${boss.shadowUnitName} has joined your Legion!"
+            _celebrationEvent.value = "SHADOW EXTRACTION: 'ARISE!' ${boss.shadowUnitName} joined your Legion!"
+        }
+    }
+
+    /**
+     * Toggles whether a shadow unit is deployed into the active raid squadron (max 3).
+     */
+    fun toggleDeployShadow(shadowId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val shadow = db.shadowDao().getShadowById(shadowId) ?: return@launch
+            val currentlyDeployed = db.shadowDao().getAllShadowsOnce().filter { it.isDeployed }
+
+            if (!shadow.isDeployed && currentlyDeployed.size >= 3) {
+                // Already at capacity 3, undeploy the oldest one
+                val oldest = currentlyDeployed.first()
+                db.shadowDao().updateShadow(oldest.copy(isDeployed = false))
+            }
+
+            db.shadowDao().updateShadow(shadow.copy(isDeployed = !shadow.isDeployed))
+        }
+    }
+
+    /**
+     * Upgrades a shadow's rank and combat capabilities using Mana Crystals or Gold.
+     */
+    fun upgradeShadow(shadowId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val p = db.playerDao().getPlayerProfileOnce() ?: return@launch
+            val shadow = db.shadowDao().getShadowById(shadowId) ?: return@launch
+
+            if (p.manaCrystals < 2 && p.gold < 150) {
+                return@launch
+            }
+
+            val newCrystals = if (p.manaCrystals >= 2) p.manaCrystals - 2 else p.manaCrystals
+            val newGold = if (p.manaCrystals < 2) p.gold - 150 else p.gold
+
+            db.playerDao().updateProfile(p.copy(manaCrystals = newCrystals, gold = newGold))
+
+            val newLevel = shadow.level + 1
+            val newMaxHp = (shadow.maxHp * 1.12f).toInt()
+            val newAtk = (shadow.attackPower * 1.10f).toInt()
+            val newDef = (shadow.defense * 1.08f).toInt()
+
+            db.shadowDao().updateShadow(
+                shadow.copy(
+                    level = newLevel,
+                    maxHp = newMaxHp,
+                    currentHp = newMaxHp,
+                    attackPower = newAtk,
+                    defense = newDef
+                )
+            )
+
+            _celebrationEvent.value = "SHADOW ASCENSION: ${shadow.name} reached Level $newLevel! (+12% HP, +10% ATK)"
         }
     }
 

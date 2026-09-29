@@ -320,7 +320,128 @@ fun ActiveBossCombatView(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Combat Logs
+        // Active Shadow Squadron on the Battlefield
+        if (state.activeShadows.isNotEmpty()) {
+            NeonCard(
+                borderColor = AriseShadowViolet,
+                backgroundColor = Color(0xFF140D26),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "👑", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "SHADOW SQUADRON (${state.activeShadows.count { it.isAlive }}/${state.activeShadows.size} ALIVE)",
+                            color = Color(0xFFD8B4FE),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                    Text(
+                        text = "PASSIVE RECONSTITUTION VIA MP",
+                        color = AriseGoldRank,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    state.activeShadows.forEach { shadow ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (shadow.isAlive) Color(0xFF1E1438) else Color(0xFF261019))
+                                .border(
+                                    1.dp,
+                                    if (shadow.isAlive) AriseShadowViolet else Color(0xFF7F1D1D),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .padding(8.dp)
+                        ) {
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = shadow.iconEmoji, fontSize = 16.sp)
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(if (shadow.isAlive) Color(0xFF4C1D95) else Color(0xFF581C28))
+                                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                                    ) {
+                                        Text(
+                                            text = if (shadow.isAlive) "FIGHTING" else "DORMANT",
+                                            color = if (shadow.isAlive) Color(0xFFE9D5FF) else Color(0xFFFCA5A5),
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = shadow.name,
+                                    color = if (shadow.isAlive) AriseTextPrimary else Color(0xFF9CA3AF),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = "Origin: ${shadow.originRank}",
+                                    color = Color(0xFFA78BFA),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+
+                                Spacer(modifier = Modifier.height(4.dp))
+                                StatProgressBar(
+                                    label = "${shadow.currentHp}/${shadow.maxHp}",
+                                    currentValue = shadow.currentHp,
+                                    maxValue = shadow.maxHp,
+                                    fillColor = if (shadow.isAlive) AriseShadowViolet else Color(0xFF6B7280)
+                                )
+
+                                if (!shadow.isAlive) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Button(
+                                        onClick = { viewModel.reconstituteShadowInBattle(shadow.id) },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(26.dp),
+                                        shape = RoundedCornerShape(4.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = AriseShadowViolet),
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) {
+                                        Text(
+                                            text = "⚡ ARISE (${shadow.mpReconstituteCost} MP)",
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()

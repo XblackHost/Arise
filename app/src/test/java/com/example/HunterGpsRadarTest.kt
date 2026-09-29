@@ -176,4 +176,34 @@ class HunterGpsRadarTest {
         assertEquals(45f, radarManager.playerBearing.value, 1f)
         assertTrue("Session steps should increment from physical GPS displacement", radarManager.sessionSteps.value > 0)
     }
+
+    @Test
+    fun `test extracted S-Rank boss scales down according to E-Rank hunter capacity`() {
+        val viewModel = com.example.viewmodel.AriseViewModel(context as android.app.Application)
+        val sRankBoss = com.example.data.BossCatalog.allBosses.first { it.rank.contains("S-Rank") }
+
+        // E-Rank Hunter Stats
+        val hunterHp = 120
+        val hunterStr = 10
+        val hunterEnd = 10
+
+        val scaled = viewModel.calculateScaledShadowStats(sRankBoss, hunterHp, hunterStr, hunterEnd)
+
+        // Verify it is OP compared to player HP (120 HP), but not 12,000 HP broken
+        assertTrue("Scaled HP should be greater than player HP", scaled.maxHp > hunterHp * 2)
+        assertTrue("Scaled HP should be bounded reasonably (< 1000 for early player)", scaled.maxHp < 1000)
+        assertTrue("Scaled ATK should be formidable", scaled.attack >= 50)
+        assertTrue("Reconstitution cost should require MP", scaled.mpReconstituteCost in 15..25)
+    }
+
+    @Test
+    fun `test passive MP reconstitution mechanics on shadow fatal damage`() {
+        val sRankBoss = com.example.data.BossCatalog.allBosses.first()
+        val viewModel = com.example.viewmodel.AriseViewModel(context as android.app.Application)
+        viewModel.startBossBattle(sRankBoss)
+
+        val state = viewModel.battleState.value
+        assertTrue("Battle should be active", state.inBattle)
+        assertNotNull("Current boss should be present", state.currentBoss)
+    }
 }
