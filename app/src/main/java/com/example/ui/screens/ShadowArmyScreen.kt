@@ -32,7 +32,16 @@ fun ShadowArmyScreen(
     onNavigateToBossRaid: () -> Unit
 ) {
     val shadows by viewModel.shadowArmy.collectAsState()
+    val profile by viewModel.playerProfile.collectAsState()
     val totalPower = shadows.sumOf { it.attackPower + it.defense }
+    val deployedCount = shadows.count { it.isDeployed }
+    val synergyPercent = when {
+        profile?.selectedClass?.contains("Monarch", ignoreCase = true) == true -> 30 + (deployedCount * 5)
+        deployedCount >= 3 -> 25
+        deployedCount == 2 -> 15
+        deployedCount == 1 -> 10
+        else -> 0
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -108,7 +117,7 @@ fun ShadowArmyScreen(
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("ARMY SYNERGY", color = AriseTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("+30% Boost", color = AriseGoldRank, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                        Text("+${synergyPercent}% Boost", color = AriseGoldRank, fontSize = 20.sp, fontWeight = FontWeight.Black)
                     }
                 }
             }
@@ -155,7 +164,8 @@ fun ShadowArmyScreen(
                 ShadowCard(
                     unit = unit,
                     onToggleDeploy = { viewModel.toggleDeployShadow(unit.id) },
-                    onUpgrade = { viewModel.upgradeShadow(unit.id) }
+                    onUpgradeWithCrystals = { viewModel.upgradeShadow(unit.id, true) },
+                    onUpgradeWithGold = { viewModel.upgradeShadow(unit.id, false) }
                 )
             }
         }
@@ -166,7 +176,8 @@ fun ShadowArmyScreen(
 fun ShadowCard(
     unit: ShadowUnit,
     onToggleDeploy: () -> Unit,
-    onUpgrade: () -> Unit
+    onUpgradeWithCrystals: () -> Unit,
+    onUpgradeWithGold: () -> Unit
 ) {
     NeonCard(
         borderColor = if (unit.isDeployed) AriseShadowViolet else Color(0xFF374151),
@@ -302,14 +313,11 @@ fun ShadowCard(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Actions: Deploy to Raid Squad & Ascend
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+        // Actions: Deploy to Raid Squad & Currency-Specific Upgrades
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = onToggleDeploy,
-                modifier = Modifier.weight(1f).height(38.dp),
+                modifier = Modifier.fillMaxWidth().height(38.dp),
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (unit.isDeployed) Color(0xFF3B185F) else Color(0xFF1E293B)
@@ -317,26 +325,46 @@ fun ShadowCard(
                 contentPadding = PaddingValues(0.dp)
             ) {
                 Text(
-                    text = if (unit.isDeployed) "⚔️ IN SQUADRON" else "➕ DEPLOY TO RAID",
+                    text = if (unit.isDeployed) "⚔️ IN ACTIVE RAID SQUADRON (TAP TO RECALL)" else "➕ DEPLOY TO VANGUARD SQUADRON",
                     color = if (unit.isDeployed) AriseGoldRank else Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
 
-            Button(
-                onClick = onUpgrade,
-                modifier = Modifier.weight(1f).height(38.dp),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4C1D95)),
-                contentPadding = PaddingValues(0.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "⚡ ASCEND (+10% STATS)",
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Button(
+                    onClick = onUpgradeWithCrystals,
+                    modifier = Modifier.weight(1f).height(36.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0C4A6E)),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(
+                        text = "💎 ASCEND (2 💎)",
+                        color = Color(0xFF38BDF8),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Button(
+                    onClick = onUpgradeWithGold,
+                    modifier = Modifier.weight(1f).height(36.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3F2B06)),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(
+                        text = "🪙 TRAIN (150 🪙)",
+                        color = AriseGoldRank,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }

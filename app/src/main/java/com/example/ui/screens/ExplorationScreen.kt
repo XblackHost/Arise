@@ -742,7 +742,7 @@ fun ExplorationScreen(
                         }
                     } else {
                         OutlinedButton(
-                            onClick = { viewModel.advanceTowardsGate(gate, 200f); viewModel.addWalkedFeet(200f) },
+                            onClick = { viewModel.advanceTowardsGate(gate, 200f) },
                             shape = RoundedCornerShape(6.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = AriseCyanNeon),
                             border = androidx.compose.foundation.BorderStroke(1.dp, AriseCyanNeon.copy(alpha = 0.5f)),

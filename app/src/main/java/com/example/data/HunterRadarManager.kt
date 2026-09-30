@@ -25,9 +25,9 @@ enum class RadarEngine(val displayName: String, val badge: String, val descripti
         "MapLibre GL Vector Tile Engine • Live Satellite Triangulation"
     ),
     OFFLINE_SQLITE(
-        "Offline: SQLite / WatermelonDB",
+        "Offline: SQLite Spatial Index",
         "Local Spatial Index",
-        "Room / SQLite Spatial Cache • WatermelonDB Sync Adapter • Zero Latency"
+        "Room / SQLite Spatial Index • Local Gate Cache • Zero Latency"
     )
 }
 
@@ -42,14 +42,14 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
 
-    // Radar Engine Mode (Online: MapLibre GL vs Offline: SQLite / WatermelonDB)
+    // Radar Engine Mode (Online: MapLibre GL vs Offline: SQLite Spatial Index)
     private val _radarEngine = MutableStateFlow(RadarEngine.ONLINE_MAPLIBRE)
     val radarEngine: StateFlow<RadarEngine> = _radarEngine.asStateFlow()
 
     private val _radarRangeFeet = MutableStateFlow(2000f)
     val radarRangeFeet: StateFlow<Float> = _radarRangeFeet.asStateFlow()
 
-    private val _sqliteCachedGateCount = MutableStateFlow(8)
+    private val _sqliteCachedGateCount = MutableStateFlow(6)
     val sqliteCachedGateCount: StateFlow<Int> = _sqliteCachedGateCount.asStateFlow()
 
     // Current player location (defaults to a central point if GPS fix pending)
@@ -97,7 +97,9 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
 
     private var lastRecordedLocation: Location? = null
     private var lastLocationTimeMs: Long = 0L
-    private var initialStepSensorCount = -1
+    private var lastRawStepCounterValue = -1
+    private var hasHardwareStepSensor = false
+    private var lastPhysicalStepTimeMs = 0L
 
     // Accelerometer-based Automatic Step Detection Filter
     private var filteredGravity = 9.81f
@@ -143,13 +145,15 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
             sensorManager?.let { sm ->
                 // 1. Hardware Step Counter
                 sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let {
+                    hasHardwareStepSensor = true
                     sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
                 }
                 // 2. Hardware Step Detector
                 sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let {
+                    hasHardwareStepSensor = true
                     sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
                 }
-                // 3. Accelerometer (Fallback automatic step detection on ALL phones & emulators)
+                // 3. Accelerometer (Fallback automatic step detection on phones without hardware pedometer)
                 sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
                     sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
                 }
@@ -167,6 +171,8 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
         _isTracking.value = false
         _isWalking.value = false
         _walkingSpeedMps.value = 0f
+        hasHardwareStepSensor = false
+        lastRawStepCounterValue = -1
         try {
             locationManager?.removeUpdates(this)
             sensorManager?.unregisterListener(this)
@@ -206,10 +212,14 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
                 }
                 _playerBearing.value = bearing
 
-                // Increment steps based on ground distance covered (~0.762m per stride)
-                val addedSteps = (deltaMeters / 0.762f).roundToInt().coerceAtLeast(1)
-                _sessionSteps.value += addedSteps
-                _burnedCalories.value = _sessionSteps.value * 0.04f
+                // Fallback steps ONLY if no physical pedometer/accelerometer step events occurred recently
+                // (e.g. running on an emulator or simulated GPS without sensor pulses)
+                val timeSinceSensorStep = now - lastPhysicalStepTimeMs
+                if (timeSinceSensorStep > 3500L) {
+                    val addedSteps = (deltaMeters / 0.762f).roundToInt().coerceAtLeast(1)
+                    _sessionSteps.value += addedSteps
+                    _burnedCalories.value = _sessionSteps.value * 0.04f
+                }
             } else if (deltaMeters < 0.3f) {
                 // Standing still
                 _walkingSpeedMps.value = 0f
@@ -252,13 +262,16 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
 
             Sensor.TYPE_STEP_COUNTER -> {
                 val totalSteps = event.values[0].toInt()
-                if (initialStepSensorCount < 0) {
-                    initialStepSensorCount = totalSteps
-                }
-                val stepsDelta = (totalSteps - initialStepSensorCount).coerceAtLeast(0)
-                if (stepsDelta > _sessionSteps.value) {
-                    val diff = stepsDelta - _sessionSteps.value
-                    onPhysicalStepDetected(diff)
+                if (lastRawStepCounterValue < 0) {
+                    lastRawStepCounterValue = totalSteps
+                } else {
+                    val delta = totalSteps - lastRawStepCounterValue
+                    if (delta in 1..100) {
+                        lastRawStepCounterValue = totalSteps
+                        onPhysicalStepDetected(delta)
+                    } else if (delta > 100) {
+                        lastRawStepCounterValue = totalSteps
+                    }
                 }
             }
 
@@ -267,6 +280,9 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
             }
 
             Sensor.TYPE_ACCELEROMETER -> {
+                // If hardware step sensor is actively reporting, skip accelerometer to prevent double counting
+                if (hasHardwareStepSensor && lastRawStepCounterValue >= 0) return
+
                 // High-precision physical step detection from real movement / walking
                 val x = event.values[0]
                 val y = event.values[1]
@@ -292,34 +308,38 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
 
     private fun onPhysicalStepDetected(count: Int = 1) {
         if (count <= 0) return
+        lastPhysicalStepTimeMs = System.currentTimeMillis()
         _sessionSteps.value += count
         _isWalking.value = true
-
-        // 1 step is approximately 2.5 feet (0.762 meters)
-        val addedFeet = count * 2.5f
-        val addedMeters = count * 0.762f
-        _sessionFeet.value += addedFeet
-        _sessionMeters.value += addedMeters
         _burnedCalories.value = _sessionSteps.value * 0.04f
 
         if (_walkingSpeedMps.value <= 0.1f) {
             _walkingSpeedMps.value = 1.35f // Average walking speed ~1.35 m/s
         }
 
-        // Advance character in world space along current heading
-        val target = selectedGate.value
-        if (target != null && target.distanceMeters > 0.5f) {
-            advanceTowardsGate(target, addedFeet)
-        } else {
-            val (newLat, newLng) = calculateOffsetCoordinate(
-                _currentLatitude.value,
-                _currentLongitude.value,
-                addedMeters.toDouble(),
-                _playerBearing.value.toDouble()
-            )
-            _currentLatitude.value = newLat
-            _currentLongitude.value = newLng
-            updateDistancesToGates(newLat, newLng)
+        // Distance from steps is only accumulated when GPS fix is NOT active.
+        // When GPS is active, onLocationChanged already accurately measures true ground displacement.
+        if (!_hasGpsFix.value) {
+            val addedFeet = count * 2.5f
+            val addedMeters = count * 0.762f
+            _sessionFeet.value += addedFeet
+            _sessionMeters.value += addedMeters
+
+            // Advance character in world space along current heading
+            val target = selectedGate.value
+            if (target != null && target.distanceMeters > 0.5f) {
+                advanceTowardsGate(target, addedFeet)
+            } else {
+                val (newLat, newLng) = calculateOffsetCoordinate(
+                    _currentLatitude.value,
+                    _currentLongitude.value,
+                    addedMeters.toDouble(),
+                    _playerBearing.value.toDouble()
+                )
+                _currentLatitude.value = newLat
+                _currentLongitude.value = newLng
+                updateDistancesToGates(newLat, newLng)
+            }
         }
     }
 
@@ -494,6 +514,7 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
         }
 
         _spawnedGates.value = newGates
+        _sqliteCachedGateCount.value = newGates.size
         if (_selectedGate.value == null || _spawnedGates.value.none { it.id == _selectedGate.value?.id }) {
             _selectedGate.value = newGates.firstOrNull()
         }

@@ -201,11 +201,15 @@ fun FirstLaunchApiKeyScreen(
                             )
                         }
                         IconButton(onClick = {
-                            clipboardManager?.primaryClip?.let { clip ->
-                                if (clip.itemCount > 0) {
-                                    val text = clip.getItemAt(0).text?.toString() ?: ""
-                                    if (text.isNotBlank()) inputKey = text.trim()
+                            try {
+                                clipboardManager?.primaryClip?.let { clip ->
+                                    if (clip.itemCount > 0) {
+                                        val text = clip.getItemAt(0).text?.toString() ?: ""
+                                        if (text.isNotBlank()) inputKey = text.trim()
+                                    }
                                 }
+                            } catch (e: Exception) {
+                                // Safeguard against restricted OEM clipboard access on Android 12+
                             }
                         }) {
                             Icon(

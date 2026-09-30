@@ -18,6 +18,9 @@ interface EquipmentDao {
     @Query("SELECT * FROM equipment_items WHERE isEquipped = 1")
     fun getEquippedItems(): Flow<List<Equipment>>
 
+    @Query("SELECT * FROM equipment_items WHERE isEquipped = 1")
+    suspend fun getEquippedItemsOnce(): List<Equipment>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEquipment(item: Equipment): Long
 

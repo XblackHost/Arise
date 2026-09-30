@@ -651,7 +651,7 @@ object ClassCatalog {
             activeSkill = "Rune Explosion (Detonates inscribed rune on target)",
             ultimateAbility = "Yggdrasil Rune Array (All runes explode in cosmic sequence)",
             playstyle = "Rune setup and explosive triggers",
-            iconEmoji = "ᚱ"
+            iconEmoji = "✨"
         ),
         AriseClass(
             id = "arcane_archer",

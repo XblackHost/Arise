@@ -45,7 +45,8 @@ fun DashboardScreen(
     onNavigateToExploration: () -> Unit,
     onNavigateToNyx: () -> Unit,
     onNavigateToShadows: () -> Unit,
-    onNavigateToMultiplayer: () -> Unit = {}
+    onNavigateToMultiplayer: () -> Unit = {},
+    onNavigateToInventory: () -> Unit = {}
 ) {
     val profile by viewModel.playerProfile.collectAsState()
     val allQuests by viewModel.quests.collectAsState()
@@ -265,6 +266,19 @@ fun DashboardScreen(
                         Text("Co-Op Squad", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+
+                // Row 3: Hunter Armory & Vault
+                Button(
+                    onClick = onNavigateToInventory,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3F2B06)),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AriseGoldRank.copy(alpha = 0.5f))
+                ) {
+                    Icon(Icons.Default.Shield, contentDescription = null, tint = AriseGoldRank, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Hunter Armory & Equipment Vault", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AriseGoldRank)
+                }
             }
         }
 
@@ -380,6 +394,21 @@ private fun QuestMiniCard(quest: Quest, onComplete: () -> Unit) {
                         fontWeight = FontWeight.Black
                     )
                 }
+
+                // Verification Type Badge
+                val (verifyLabel, verifyColor) = when (quest.verificationType) {
+                    com.example.data.model.VerificationType.TIMER -> "⏱️ Timer Verified" to AriseCyanNeon
+                    com.example.data.model.VerificationType.STEPS -> "👟 Step Sensor Verified" to AriseEmeraldHeal
+                    com.example.data.model.VerificationType.OPTIONAL_PROOF -> "📸 Proof Audit" to AriseShadowViolet
+                    com.example.data.model.VerificationType.SELF_CONFIRMATION -> "📋 Hunter Verified" to AriseGoldRank
+                }
+                Text(
+                    text = verifyLabel,
+                    color = verifyColor,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
                 Text(
                     text = quest.description,
                     color = AriseTextSecondary,

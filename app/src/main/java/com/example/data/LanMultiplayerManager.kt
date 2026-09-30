@@ -37,6 +37,7 @@ class LanMultiplayerManager {
 
     private var broadcastJob: Job? = null
     private var listenJob: Job? = null
+    private var activeSocket: DatagramSocket? = null
 
     init {
         // Pre-populate with a nearby active local guild party for quick in-person/offline play
@@ -67,12 +68,13 @@ class LanMultiplayerManager {
 
     fun startListening() {
         if (listenJob?.isActive == true) return
-        listenJob = scope.launch {
+        listenJob = scope.launch(Dispatchers.IO) {
             try {
                 val socket = DatagramSocket(UDP_PORT).apply {
                     broadcast = true
                     soTimeout = 4000
                 }
+                activeSocket = socket
                 val buffer = ByteArray(1024)
 
                 while (isActive) {
@@ -87,11 +89,26 @@ class LanMultiplayerManager {
                         // socket timeout or non-critical packet drop
                     }
                 }
-                socket.close()
             } catch (e: Exception) {
                 Log.w(TAG, "LAN listener initialization notice: ${e.message}")
+            } finally {
+                try {
+                    activeSocket?.close()
+                    activeSocket = null
+                } catch (ignored: Exception) {}
             }
         }
+    }
+
+    fun stopListening() {
+        broadcastJob?.cancel()
+        broadcastJob = null
+        listenJob?.cancel()
+        listenJob = null
+        try {
+            activeSocket?.close()
+            activeSocket = null
+        } catch (ignored: Exception) {}
     }
 
     private fun parseDiscoveredParty(payload: String, ip: String) {

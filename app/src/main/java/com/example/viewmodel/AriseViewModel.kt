@@ -41,7 +41,9 @@ data class BattleState(
     val currentBoss: DungeonBoss? = null,
     val bossCurrentHp: Int = 100,
     val playerCurrentHp: Int = 120,
+    val playerMaxHp: Int = 120,
     val playerCurrentMp: Int = 60,
+    val playerMaxMp: Int = 60,
     val activeShadows: List<ActiveBattleShadow> = emptyList(),
     val logMessages: List<String> = emptyList(),
     val isVictory: Boolean = false,
@@ -64,6 +66,9 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     // First-launch & Key State
     private val _hasCompletedFirstLaunch = MutableStateFlow(apiKeyStorage.hasCompletedFirstLaunch())
     val hasCompletedFirstLaunch: StateFlow<Boolean> = _hasCompletedFirstLaunch.asStateFlow()
+
+    private val _hasValidApiKey = MutableStateFlow(apiKeyStorage.hasValidApiKey())
+    val hasValidApiKey: StateFlow<Boolean> = _hasValidApiKey.asStateFlow()
 
     private val _maskedApiKey = MutableStateFlow(apiKeyStorage.getMaskedApiKey())
     val maskedApiKey: StateFlow<String> = _maskedApiKey.asStateFlow()
@@ -127,6 +132,12 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     private val _isNyxReplying = MutableStateFlow(false)
     val isNyxReplying: StateFlow<Boolean> = _isNyxReplying.asStateFlow()
 
+    override fun onCleared() {
+        super.onCleared()
+        radarManager.stopTracking()
+        multiplayerManager.stopListening()
+    }
+
     // ----------------------------------------------------
     // API KEY & FIRST LAUNCH MANAGEMENT
     // ----------------------------------------------------
@@ -138,17 +149,26 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             if (verifyResult.isSuccess) {
                 apiKeyStorage.saveApiKey(rawKey)
                 _maskedApiKey.value = apiKeyStorage.getMaskedApiKey()
+                _hasValidApiKey.value = true
                 _hasCompletedFirstLaunch.value = true
                 _keyValidationStatus.value = "Gemini Key verified & locked in local secure vault!"
                 onDone(true)
             } else {
-                // If network failure or invalid, give the user the option to save anyway or report error
                 val errMsg = verifyResult.exceptionOrNull()?.message ?: "Verification failed."
-                _keyValidationStatus.value = "Notice: $errMsg. (Saving in local storage anyway)"
-                apiKeyStorage.saveApiKey(rawKey)
-                _maskedApiKey.value = apiKeyStorage.getMaskedApiKey()
-                _hasCompletedFirstLaunch.value = true
-                onDone(true)
+                val isNetworkError = errMsg.contains("UnknownHost", ignoreCase = true) ||
+                        errMsg.contains("ConnectException", ignoreCase = true) ||
+                        errMsg.contains("timeout", ignoreCase = true)
+                if (isNetworkError) {
+                    apiKeyStorage.saveApiKey(rawKey)
+                    _maskedApiKey.value = apiKeyStorage.getMaskedApiKey()
+                    _hasValidApiKey.value = true
+                    _hasCompletedFirstLaunch.value = true
+                    _keyValidationStatus.value = "Notice: Saved in offline mode (Network unreachable)."
+                    onDone(true)
+                } else {
+                    _keyValidationStatus.value = "Error: Invalid Gemini API key ($errMsg)."
+                    onDone(false)
+                }
             }
         }
     }
@@ -161,6 +181,27 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     fun clearApiKey() {
         apiKeyStorage.clearApiKey()
         _maskedApiKey.value = apiKeyStorage.getMaskedApiKey()
+        _hasValidApiKey.value = false
+    }
+
+    fun addCustomQuest(quest: Quest) {
+        viewModelScope.launch(Dispatchers.IO) {
+            db.questDao().insertQuest(quest)
+            _celebrationEvent.value = "NEW MISSION REGISTERED: '${quest.title}'"
+        }
+    }
+
+    fun toggleEquip(equipment: Equipment) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (equipment.isEquipped) {
+                db.equipmentDao().unequipSlot(equipment.slot)
+                _celebrationEvent.value = "UNEQUIPPED: ${equipment.name}"
+            } else {
+                db.equipmentDao().unequipSlot(equipment.slot)
+                db.equipmentDao().updateEquipment(equipment.copy(isEquipped = true))
+                _celebrationEvent.value = "EQUIPPED: ${equipment.name} (${equipment.slot.name})"
+            }
+        }
     }
 
     // ----------------------------------------------------
@@ -306,42 +347,79 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     // SHADOW ARMY & DUNGEON COMBAT WITH SCALING & MP RECONSTITUTION
     // ----------------------------------------------------
 
-    /**
-     * Dynamically scales extracted boss stats according to the Hunter's level and rank.
-     * Prevents high-tier (e.g. S-Rank) bosses from breaking balance when defeated by
-     * early-tier (e.g. E-Rank) hunters, while remaining remarkably powerful ("pretty OP but not broken").
-     */
-    fun calculateScaledShadowStats(
-        boss: DungeonBoss,
-        hunterMaxHp: Int,
-        hunterStrength: Int,
-        hunterEndurance: Int
-    ): ScaledShadowStats {
-        val bossRankWeight = when {
-            boss.rank.contains("Monarch", ignoreCase = true) || boss.rank.contains("S-Rank", ignoreCase = true) -> 1.95f
-            boss.rank.contains("A-Rank", ignoreCase = true) -> 1.65f
-            boss.rank.contains("B-Rank", ignoreCase = true) -> 1.45f
-            boss.rank.contains("C-Rank", ignoreCase = true) -> 1.30f
-            boss.rank.contains("D-Rank", ignoreCase = true) -> 1.18f
-            else -> 1.05f
+    companion object {
+        /**
+         * Dynamically scales extracted boss stats according to the Hunter's level and rank.
+         * Prevents high-tier (e.g. S-Rank) bosses from breaking balance when defeated by
+         * early-tier (e.g. E-Rank) hunters, while remaining remarkably powerful ("pretty OP but not broken").
+         */
+        fun calculateScaledShadowStats(
+            boss: DungeonBoss,
+            hunterMaxHp: Int,
+            hunterStrength: Int,
+            hunterEndurance: Int
+        ): ScaledShadowStats {
+            val bossRankWeight = when {
+                boss.rank.contains("Monarch", ignoreCase = true) || boss.rank.contains("S-Rank", ignoreCase = true) -> 1.95f
+                boss.rank.contains("A-Rank", ignoreCase = true) -> 1.65f
+                boss.rank.contains("B-Rank", ignoreCase = true) -> 1.45f
+                boss.rank.contains("C-Rank", ignoreCase = true) -> 1.30f
+                boss.rank.contains("D-Rank", ignoreCase = true) -> 1.18f
+                else -> 1.05f
+            }
+
+            val baseHunterAtk = (hunterStrength * 2.2f + 14f).coerceAtLeast(20f)
+            val baseHunterDef = (hunterEndurance * 1.5f + 10f).coerceAtLeast(14f)
+
+            val scaledMaxHp = (hunterMaxHp * bossRankWeight * 1.45f).toInt()
+            val scaledAtk = (baseHunterAtk * bossRankWeight * 1.38f).toInt().coerceAtLeast(28)
+            val scaledDef = (baseHunterDef * bossRankWeight * 1.25f).toInt().coerceAtLeast(16)
+            val mpReconstitutionCost = (12 + (bossRankWeight * 4.5f)).toInt()
+
+            return ScaledShadowStats(
+                maxHp = scaledMaxHp,
+                attack = scaledAtk,
+                defense = scaledDef,
+                mpReconstituteCost = mpReconstitutionCost,
+                weight = bossRankWeight
+            )
         }
 
-        val baseHunterAtk = (hunterStrength * 2.2f + 14f).coerceAtLeast(20f)
-        val baseHunterDef = (hunterEndurance * 1.5f + 10f).coerceAtLeast(14f)
-
-        val scaledMaxHp = (hunterMaxHp * bossRankWeight * 1.45f).toInt()
-        val scaledAtk = (baseHunterAtk * bossRankWeight * 1.38f).toInt().coerceAtLeast(28)
-        val scaledDef = (baseHunterDef * bossRankWeight * 1.25f).toInt().coerceAtLeast(16)
-        val mpReconstitutionCost = (12 + (bossRankWeight * 4.5f)).toInt()
-
-        return ScaledShadowStats(
-            maxHp = scaledMaxHp,
-            attack = scaledAtk,
-            defense = scaledDef,
-            mpReconstituteCost = mpReconstitutionCost,
-            weight = bossRankWeight
-        )
+        fun processShadowDamageAndReconstitution(
+            shadow: ActiveBattleShadow,
+            damage: Int,
+            currentHunterMp: Int
+        ): ReconstitutionResult {
+            val remainingHp = shadow.currentHp - damage
+            return if (remainingHp <= 0) {
+                if (currentHunterMp >= shadow.mpReconstituteCost) {
+                    ReconstitutionResult(
+                        updatedShadow = shadow.copy(currentHp = shadow.maxHp, isAlive = true),
+                        consumedMp = shadow.mpReconstituteCost,
+                        didReconstitute = true
+                    )
+                } else {
+                    ReconstitutionResult(
+                        updatedShadow = shadow.copy(currentHp = 0, isAlive = false),
+                        consumedMp = 0,
+                        didReconstitute = false
+                    )
+                }
+            } else {
+                ReconstitutionResult(
+                    updatedShadow = shadow.copy(currentHp = remainingHp),
+                    consumedMp = 0,
+                    didReconstitute = false
+                )
+            }
+        }
     }
+
+    data class ReconstitutionResult(
+        val updatedShadow: ActiveBattleShadow,
+        val consumedMp: Int,
+        val didReconstitute: Boolean
+    )
 
     data class ScaledShadowStats(
         val maxHp: Int,
@@ -352,58 +430,68 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     fun startBossBattle(boss: DungeonBoss) {
-        val p = playerProfile.value
-        val deployedShadows = shadowArmy.value
-            .filter { it.isDeployed }
-            .take(3)
-            .ifEmpty { shadowArmy.value.take(3) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val p = db.playerDao().getPlayerProfileOnce()
+            val allShadows = db.shadowDao().getAllShadowsOnce()
+            val deployedShadows = allShadows
+                .filter { it.isDeployed }
+                .take(3)
+                .ifEmpty { allShadows.take(3) }
 
-        val activeShadowsList = deployedShadows.map { shadow ->
-            ActiveBattleShadow(
-                id = shadow.id,
-                name = shadow.name,
-                title = shadow.title,
-                rank = shadow.rank,
-                iconEmoji = shadow.iconEmoji,
-                currentHp = shadow.maxHp,
-                maxHp = shadow.maxHp,
-                attackPower = shadow.attackPower,
-                defense = shadow.defense,
-                signatureSkill = shadow.signatureSkill,
-                mpReconstituteCost = shadow.mpUpkeepCost,
-                isAlive = true,
-                originRank = shadow.originRank
+            val activeShadowsList = deployedShadows.map { shadow ->
+                ActiveBattleShadow(
+                    id = shadow.id,
+                    name = shadow.name,
+                    title = shadow.title,
+                    rank = shadow.rank,
+                    iconEmoji = shadow.iconEmoji,
+                    currentHp = shadow.maxHp,
+                    maxHp = shadow.maxHp,
+                    attackPower = shadow.attackPower,
+                    defense = shadow.defense,
+                    signatureSkill = shadow.signatureSkill,
+                    mpReconstituteCost = shadow.mpUpkeepCost,
+                    isAlive = true,
+                    originRank = shadow.originRank
+                )
+            }
+
+            val initialLogs = mutableListOf(
+                "⚔️ Raid commenced! ${boss.name} (${boss.rank}) emerges with murderous intent!",
+                "Boss Weakness: ${boss.weakness}. Watch out for '${boss.bossSpecialAttackName}'!"
+            )
+
+            if (activeShadowsList.isNotEmpty()) {
+                initialLogs.add("👑 SHADOW SQUADRON DEPLOYED: [${activeShadowsList.joinToString { it.name }}] emerge from the dark mist to fight at your command!")
+            } else {
+                initialLogs.add("ℹ️ No shadows deployed. Slay this boss to extract its soul with 'ARISE'!")
+            }
+
+            val maxHp = p?.maxHp ?: 120
+            val maxMp = p?.maxMp ?: 60
+            val currentHp = p?.hp ?: maxHp
+            val currentMp = p?.mp ?: maxMp
+
+            _battleState.value = BattleState(
+                inBattle = true,
+                currentBoss = boss,
+                bossCurrentHp = boss.maxHp,
+                playerCurrentHp = currentHp,
+                playerMaxHp = maxHp,
+                playerCurrentMp = currentMp,
+                playerMaxMp = maxMp,
+                activeShadows = activeShadowsList,
+                logMessages = initialLogs,
+                isVictory = false,
+                isDefeat = false,
+                extractionEligible = false,
+                isExtracted = false,
+                isBossEnraged = false,
+                isBossChargingUltimate = false,
+                isPlayerDefending = false,
+                healthPotionsRemaining = 2
             )
         }
-
-        val initialLogs = mutableListOf(
-            "⚔️ Raid commenced! ${boss.name} (${boss.rank}) emerges with murderous intent!",
-            "Boss Weakness: ${boss.weakness}. Watch out for '${boss.bossSpecialAttackName}'!"
-        )
-
-        if (activeShadowsList.isNotEmpty()) {
-            initialLogs.add("👑 SHADOW SQUADRON DEPLOYED: [${activeShadowsList.joinToString { it.name }}] emerge from the dark mist to fight at your command!")
-        } else {
-            initialLogs.add("ℹ️ No shadows deployed. Slay this boss to extract its soul with 'ARISE'!")
-        }
-
-        _battleState.value = BattleState(
-            inBattle = true,
-            currentBoss = boss,
-            bossCurrentHp = boss.maxHp,
-            playerCurrentHp = p?.maxHp ?: 120,
-            playerCurrentMp = p?.maxMp ?: 60,
-            activeShadows = activeShadowsList,
-            logMessages = initialLogs,
-            isVictory = false,
-            isDefeat = false,
-            extractionEligible = false,
-            isExtracted = false,
-            isBossEnraged = false,
-            isBossChargingUltimate = false,
-            isPlayerDefending = false,
-            healthPotionsRemaining = 2
-        )
     }
 
     /**
@@ -452,6 +540,10 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         val actionLogs = mutableListOf<String>()
         val shadowList = current.activeShadows.toMutableList()
 
+        val equippedGear = equipment.value.filter { it.isEquipped }
+        val gearAtkBonus = equippedGear.sumOf { it.attackBonus }
+        val gearDefBonus = equippedGear.sumOf { it.defenseBonus }
+
         when (actionType) {
             "HEAL" -> {
                 if (potionsLeft <= 0) {
@@ -471,8 +563,8 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 actionLogs.add("🛡️ Hunter assumes Steel Parry Stance! +15 MP restored. Incoming damage reduced by 70%!")
             }
             "BASIC" -> {
-                damageDealt = (profile.strength * 2.4 + profile.agility * 1.0 - boss.defense * 0.4).toInt().coerceAtLeast(18)
-                actionLogs.add("Hunter strikes with Physical Precision for $damageDealt damage!")
+                damageDealt = ((profile.strength * 2.4 + profile.agility * 1.0 + gearAtkBonus * 1.2) - boss.defense * 0.4).toInt().coerceAtLeast(18)
+                actionLogs.add("Hunter strikes with Physical Precision for $damageDealt damage!${if (gearAtkBonus > 0) " (+${gearAtkBonus} Gear ATK)" else ""}")
             }
             "CLASS_SKILL" -> {
                 mpCost = 15
@@ -483,7 +575,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     return
                 }
                 playerMpAfterAction -= mpCost
-                damageDealt = (profile.strength * 3.4 + profile.agility * 2.2 - boss.defense * 0.5).toInt().coerceAtLeast(35)
+                damageDealt = ((profile.strength * 3.4 + profile.agility * 2.2 + gearAtkBonus * 1.8) - boss.defense * 0.5).toInt().coerceAtLeast(35)
                 actionLogs.add("⚡ Hunter unleashes Class Vanguard Technique for $damageDealt critical damage!")
             }
             "SHADOW_SUMMON" -> {
@@ -505,7 +597,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val aliveShadowPower = shadowList.filter { it.isAlive }.sumOf { it.attackPower }
-                damageDealt = (aliveShadowPower * 1.6 + profile.intelligence * 2.2 - boss.defense * 0.3).toInt().coerceAtLeast(50)
+                damageDealt = (aliveShadowPower * 1.6 + profile.intelligence * 2.2 + gearAtkBonus * 1.5 - boss.defense * 0.3).toInt().coerceAtLeast(50)
                 actionLogs.add("👑 SHADOW MONARCH OVERLOAD: Shadows converge into dark astral vortex dealing $damageDealt catastrophic damage!")
             }
             "ULTIMATE" -> {
@@ -517,25 +609,39 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     return
                 }
                 playerMpAfterAction -= mpCost
-                damageDealt = (profile.strength * 5.2 + profile.intelligence * 3.8 - boss.defense * 0.4).toInt().coerceAtLeast(75)
+                damageDealt = ((profile.strength * 5.2 + profile.intelligence * 3.8 + gearAtkBonus * 2.5) - boss.defense * 0.4).toInt().coerceAtLeast(75)
                 actionLogs.add("💥 MONARCH'S WRATH: Dark astral shockwaves annihilate the battlefield for $damageDealt damage!")
             }
         }
 
-        // --- SHADOW SQUADRON ATTACK TURN ---
+        // --- SHADOW SQUADRON ATTACK TURN WITH SYNERGY & MONARCH BOOST ---
+        val aliveShadows = shadowList.filter { it.isAlive }
+        val deployedCount = aliveShadows.size
+        val baseSynergyPercent = when {
+            deployedCount >= 3 -> 25
+            deployedCount == 2 -> 15
+            deployedCount == 1 -> 10
+            else -> 0
+        }
+        val isMonarch = profile.selectedClass.contains("Monarch", ignoreCase = true) || profile.rank.contains("Monarch", ignoreCase = true)
+        val monarchBonusPercent = if (isMonarch) 30 else 0
+        val totalSynergyPercent = baseSynergyPercent + monarchBonusPercent
+        val synergyMultiplier = 1.0f + (totalSynergyPercent / 100f)
+
         var totalShadowDmg = 0
-        shadowList.filter { it.isAlive }.forEach { shadow ->
+        aliveShadows.forEach { shadow ->
             val isSkill = (1..100).random() <= 40
-            val shadowDmg = if (isSkill) {
+            val baseDmg = if (isSkill) {
                 ((shadow.attackPower * 1.6f) - boss.defense * 0.25f).toInt().coerceAtLeast(18)
             } else {
                 ((shadow.attackPower * 1.15f) - boss.defense * 0.3f).toInt().coerceAtLeast(12)
             }
+            val shadowDmg = (baseDmg * synergyMultiplier).toInt()
             totalShadowDmg += shadowDmg
             if (isSkill) {
-                actionLogs.add("👥 [${shadow.name}] executes '${shadow.signatureSkill}' for $shadowDmg damage!")
+                actionLogs.add("👥 [${shadow.name}] executes '${shadow.signatureSkill}' for $shadowDmg damage! ${if (totalSynergyPercent > 0) "(+${totalSynergyPercent}% Synergy Boost)" else ""}")
             } else {
-                actionLogs.add("👥 [${shadow.name}] cleaves boss with dark daggers for $shadowDmg damage!")
+                actionLogs.add("👥 [${shadow.name}] strikes with dark shadow blade for $shadowDmg damage!")
             }
         }
 
@@ -571,7 +677,6 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         val atkMultiplier = if (isEnraged) 1.35f else 1.0f
         var willChargeNext = false
 
-        val aliveShadows = shadowList.filter { it.isAlive }
         // 60% chance boss attacks an active shadow (drawing aggro), 40% chance it targets the hunter
         val targetShadowIndex = if (aliveShadows.isNotEmpty() && (1..100).random() <= 60 && !current.isBossChargingUltimate) {
             val chosen = aliveShadows.random()
@@ -725,36 +830,66 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleDeployShadow(shadowId: Long) {
         viewModelScope.launch(Dispatchers.IO) {
             val shadow = db.shadowDao().getShadowById(shadowId) ?: return@launch
-            val currentlyDeployed = db.shadowDao().getAllShadowsOnce().filter { it.isDeployed }
+            val currentlyDeployed = db.shadowDao().getAllShadowsOnce()
+                .filter { it.isDeployed }
+                .sortedBy { it.extractionDate } // Deterministic: oldest first
 
-            if (!shadow.isDeployed && currentlyDeployed.size >= 3) {
-                // Already at capacity 3, undeploy the oldest one
-                val oldest = currentlyDeployed.first()
-                db.shadowDao().updateShadow(oldest.copy(isDeployed = false))
+            if (!shadow.isDeployed) {
+                if (currentlyDeployed.size >= 3) {
+                    val oldest = currentlyDeployed.first()
+                    db.shadowDao().updateShadow(oldest.copy(isDeployed = false))
+                    _celebrationEvent.value = "SQUADRON REASSIGNMENT: ${oldest.name} returned to reserves. ${shadow.name} deployed to Vanguard!"
+                } else {
+                    _celebrationEvent.value = "SQUADRON DEPLOYMENT: ${shadow.name} deployed to Vanguard!"
+                }
+                db.shadowDao().updateShadow(shadow.copy(isDeployed = true))
+            } else {
+                db.shadowDao().updateShadow(shadow.copy(isDeployed = false))
+                _celebrationEvent.value = "${shadow.name} recalled from active Vanguard to reserves."
             }
-
-            db.shadowDao().updateShadow(shadow.copy(isDeployed = !shadow.isDeployed))
         }
     }
 
     /**
      * Upgrades a shadow's rank and combat capabilities using Mana Crystals or Gold.
      */
-    fun upgradeShadow(shadowId: Long) {
+    fun upgradeShadow(shadowId: Long, useManaCrystals: Boolean? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             val p = db.playerDao().getPlayerProfileOnce() ?: return@launch
             val shadow = db.shadowDao().getShadowById(shadowId) ?: return@launch
 
-            if (p.manaCrystals < 2 && p.gold < 150) {
-                return@launch
+            val spendCrystals = when (useManaCrystals) {
+                true -> {
+                    if (p.manaCrystals < 2) {
+                        _celebrationEvent.value = "Insufficient Mana Crystals! Upgrade requires 2 💎."
+                        return@launch
+                    }
+                    true
+                }
+                false -> {
+                    if (p.gold < 150) {
+                        _celebrationEvent.value = "Insufficient Gold! Upgrade requires 150 🪙."
+                        return@launch
+                    }
+                    false
+                }
+                null -> {
+                    if (p.manaCrystals >= 2) true
+                    else if (p.gold >= 150) false
+                    else {
+                        _celebrationEvent.value = "Insufficient resources! Upgrade requires 2 Mana Crystals or 150 Gold."
+                        return@launch
+                    }
+                }
             }
 
-            val newCrystals = if (p.manaCrystals >= 2) p.manaCrystals - 2 else p.manaCrystals
-            val newGold = if (p.manaCrystals < 2) p.gold - 150 else p.gold
+            val newCrystals = if (spendCrystals) p.manaCrystals - 2 else p.manaCrystals
+            val newGold = if (!spendCrystals) p.gold - 150 else p.gold
 
             db.playerDao().updateProfile(p.copy(manaCrystals = newCrystals, gold = newGold))
 
             val newLevel = shadow.level + 1
+            val newReqXp = (shadow.requiredXp * 1.35f).toInt()
             val newMaxHp = (shadow.maxHp * 1.12f).toInt()
             val newAtk = (shadow.attackPower * 1.10f).toInt()
             val newDef = (shadow.defense * 1.08f).toInt()
@@ -762,6 +897,8 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             db.shadowDao().updateShadow(
                 shadow.copy(
                     level = newLevel,
+                    currentXp = 0,
+                    requiredXp = newReqXp,
                     maxHp = newMaxHp,
                     currentHp = newMaxHp,
                     attackPower = newAtk,
@@ -769,7 +906,8 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
 
-            _celebrationEvent.value = "SHADOW ASCENSION: ${shadow.name} reached Level $newLevel! (+12% HP, +10% ATK)"
+            val paidDesc = if (spendCrystals) "2 💎" else "150 🪙"
+            _celebrationEvent.value = "SHADOW ASCENSION: ${shadow.name} reached Level $newLevel! (Paid $paidDesc, +12% HP, +10% ATK)"
         }
     }
 
@@ -804,6 +942,40 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
 
+            // Award combat XP to deployed shadows in combat
+            val allShadows = db.shadowDao().getAllShadowsOnce()
+            val deployed = allShadows.filter { it.isDeployed }
+            val sXpGain = (boss.maxHp * 0.25f).toInt().coerceAtLeast(35)
+            deployed.forEach { s ->
+                var currXp = s.currentXp + sXpGain
+                var sLevel = s.level
+                var sReq = s.requiredXp
+                var sMaxHp = s.maxHp
+                var sAtk = s.attackPower
+                var sDef = s.defense
+                var sLeveled = false
+                while (currXp >= sReq) {
+                    currXp -= sReq
+                    sLevel += 1
+                    sReq = (sReq * 1.35f).toInt()
+                    sMaxHp = (sMaxHp * 1.10f).toInt()
+                    sAtk = (sAtk * 1.08f).toInt()
+                    sDef = (sDef * 1.06f).toInt()
+                    sLeveled = true
+                }
+                db.shadowDao().updateShadow(
+                    s.copy(
+                        level = sLevel,
+                        currentXp = currXp,
+                        requiredXp = sReq,
+                        maxHp = sMaxHp,
+                        currentHp = sMaxHp,
+                        attackPower = sAtk,
+                        defense = sDef
+                    )
+                )
+            }
+
             if (didLevelUp) {
                 _celebrationEvent.value = "DUNGEON CLEARED & LEVEL UP! Hunter reached Level $newLevel!"
             }
@@ -811,6 +983,15 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun endBattle() {
+        val state = _battleState.value
+        viewModelScope.launch(Dispatchers.IO) {
+            val p = db.playerDao().getPlayerProfileOnce()
+            if (p != null && state.inBattle) {
+                val endHp = if (state.isDefeat) 1.coerceAtMost(p.maxHp) else state.playerCurrentHp.coerceIn(1, p.maxHp)
+                val endMp = state.playerCurrentMp.coerceIn(0, p.maxMp)
+                db.playerDao().updateProfile(p.copy(hp = endHp, mp = endMp))
+            }
+        }
         _battleState.value = BattleState()
     }
 

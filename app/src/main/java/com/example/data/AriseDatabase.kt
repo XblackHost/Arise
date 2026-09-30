@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.dao.ChatDao
 import com.example.data.dao.EquipmentDao
@@ -51,6 +52,15 @@ abstract class AriseDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AriseDatabase? = null
 
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE shadow_units ADD COLUMN originRank TEXT NOT NULL DEFAULT 'E-Rank'")
+                db.execSQL("ALTER TABLE shadow_units ADD COLUMN mpUpkeepCost INTEGER NOT NULL DEFAULT 15")
+                db.execSQL("ALTER TABLE shadow_units ADD COLUMN isDeployed INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE shadow_units ADD COLUMN maxHp INTEGER NOT NULL DEFAULT 350")
+            }
+        }
+
         fun getDatabase(context: Context): AriseDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -58,7 +68,8 @@ abstract class AriseDatabase : RoomDatabase() {
                     AriseDatabase::class.java,
                     "arise_rpg_database"
                 )
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(MIGRATION_1_2)
+                    .fallbackToDestructiveMigrationOnDowngrade()
                     .addCallback(DatabaseCallback())
                     .build()
                 INSTANCE = instance

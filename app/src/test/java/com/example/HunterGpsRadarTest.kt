@@ -179,7 +179,6 @@ class HunterGpsRadarTest {
 
     @Test
     fun `test extracted S-Rank boss scales down according to E-Rank hunter capacity`() {
-        val viewModel = com.example.viewmodel.AriseViewModel(context as android.app.Application)
         val sRankBoss = com.example.data.BossCatalog.allBosses.first { it.rank.contains("S-Rank") }
 
         // E-Rank Hunter Stats
@@ -187,7 +186,7 @@ class HunterGpsRadarTest {
         val hunterStr = 10
         val hunterEnd = 10
 
-        val scaled = viewModel.calculateScaledShadowStats(sRankBoss, hunterHp, hunterStr, hunterEnd)
+        val scaled = com.example.viewmodel.AriseViewModel.calculateScaledShadowStats(sRankBoss, hunterHp, hunterStr, hunterEnd)
 
         // Verify it is OP compared to player HP (120 HP), but not 12,000 HP broken
         assertTrue("Scaled HP should be greater than player HP", scaled.maxHp > hunterHp * 2)
@@ -198,12 +197,51 @@ class HunterGpsRadarTest {
 
     @Test
     fun `test passive MP reconstitution mechanics on shadow fatal damage`() {
-        val sRankBoss = com.example.data.BossCatalog.allBosses.first()
-        val viewModel = com.example.viewmodel.AriseViewModel(context as android.app.Application)
-        viewModel.startBossBattle(sRankBoss)
+        val testShadow = com.example.viewmodel.ActiveBattleShadow(
+            id = 1L,
+            name = "Igris",
+            title = "Knight of Blood & Shadows",
+            rank = "Commander",
+            currentHp = 100,
+            maxHp = 300,
+            attackPower = 80,
+            defense = 50,
+            signatureSkill = "Bloodred Sever",
+            mpReconstituteCost = 20,
+            isAlive = true
+        )
 
-        val state = viewModel.battleState.value
-        assertTrue("Battle should be active", state.inBattle)
-        assertNotNull("Current boss should be present", state.currentBoss)
+        // Case 1: Fatal damage with sufficient Hunter MP (30 MP >= 20 MP cost)
+        val resultWithMp = com.example.viewmodel.AriseViewModel.processShadowDamageAndReconstitution(
+            shadow = testShadow,
+            damage = 150, // exceeds currentHp (100) -> fatal blow
+            currentHunterMp = 30
+        )
+        assertTrue("Shadow should automatically reconstitute from shadows", resultWithMp.didReconstitute)
+        assertEquals("Hunter MP should be consumed for reconstitution", 20, resultWithMp.consumedMp)
+        assertEquals("Shadow HP should be restored to max", 300, resultWithMp.updatedShadow.currentHp)
+        assertTrue("Shadow should remain alive on battlefield", resultWithMp.updatedShadow.isAlive)
+
+        // Case 2: Fatal damage with depleted Hunter MP (10 MP < 20 MP cost)
+        val resultWithoutMp = com.example.viewmodel.AriseViewModel.processShadowDamageAndReconstitution(
+            shadow = testShadow,
+            damage = 150,
+            currentHunterMp = 10
+        )
+        assertFalse("Shadow cannot reconstitute without sufficient MP", resultWithoutMp.didReconstitute)
+        assertEquals("No MP consumed when insufficient", 0, resultWithoutMp.consumedMp)
+        assertEquals("Shadow HP should drop to 0", 0, resultWithoutMp.updatedShadow.currentHp)
+        assertFalse("Shadow should enter dormant state", resultWithoutMp.updatedShadow.isAlive)
+
+        // Case 3: Non-fatal damage
+        val nonFatalResult = com.example.viewmodel.AriseViewModel.processShadowDamageAndReconstitution(
+            shadow = testShadow,
+            damage = 40,
+            currentHunterMp = 50
+        )
+        assertFalse("Non-fatal damage does not trigger reconstitution", nonFatalResult.didReconstitute)
+        assertEquals("No MP consumed on non-fatal damage", 0, nonFatalResult.consumedMp)
+        assertEquals("Shadow HP reduced by damage amount", 60, nonFatalResult.updatedShadow.currentHp)
+        assertTrue("Shadow remains alive", nonFatalResult.updatedShadow.isAlive)
     }
 }

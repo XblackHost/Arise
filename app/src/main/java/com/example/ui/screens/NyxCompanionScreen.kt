@@ -35,7 +35,7 @@ fun NyxCompanionScreen(
 ) {
     val messages by viewModel.chatMessages.collectAsState()
     val isReplying by viewModel.isNyxReplying.collectAsState()
-    val hasKey = viewModel.apiKeyStorage.hasValidApiKey()
+    val hasKey by viewModel.hasValidApiKey.collectAsState()
 
     var inputPrompt by remember { mutableStateOf("") }
     val listState = rememberLazyListState()

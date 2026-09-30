@@ -42,7 +42,7 @@ enum class AriseScreen(val label: String) {
     EXPLORATION("Explore"),
     MULTIPLAYER("Squadron"),
     INVENTORY("Inventory"),
-    SETTINGS("Vault")
+    SETTINGS("Settings")
 }
 
 class MainActivity : ComponentActivity() {
@@ -116,6 +116,13 @@ fun MainAriseApp(viewModel: AriseViewModel) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { currentScreen = AriseScreen.INVENTORY }) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = "Armory & Inventory",
+                            tint = if (currentScreen == AriseScreen.INVENTORY) AriseGoldRank else AriseTextSecondary
+                        )
+                    }
                     IconButton(onClick = { currentScreen = AriseScreen.EXPLORATION }) {
                         Icon(
                             imageVector = Icons.Default.Explore,
@@ -249,7 +256,8 @@ fun MainAriseApp(viewModel: AriseViewModel) {
                     onNavigateToExploration = { currentScreen = AriseScreen.EXPLORATION },
                     onNavigateToNyx = { currentScreen = AriseScreen.NYX },
                     onNavigateToShadows = { currentScreen = AriseScreen.SHADOWS },
-                    onNavigateToMultiplayer = { currentScreen = AriseScreen.MULTIPLAYER }
+                    onNavigateToMultiplayer = { currentScreen = AriseScreen.MULTIPLAYER },
+                    onNavigateToInventory = { currentScreen = AriseScreen.INVENTORY }
                 )
                 AriseScreen.QUESTS -> QuestsScreen(viewModel = viewModel)
                 AriseScreen.DUNGEONS -> DungeonBossScreen(viewModel = viewModel)
@@ -263,7 +271,8 @@ fun MainAriseApp(viewModel: AriseViewModel) {
                 )
                 AriseScreen.CHARACTER -> CharacterScreen(
                     viewModel = viewModel,
-                    onNavigateToClasses = { currentScreen = AriseScreen.CLASSES }
+                    onNavigateToClasses = { currentScreen = AriseScreen.CLASSES },
+                    onNavigateToInventory = { currentScreen = AriseScreen.INVENTORY }
                 )
                 AriseScreen.CLASSES -> ClassesScreen(viewModel = viewModel)
                 AriseScreen.EXPLORATION -> ExplorationScreen(
@@ -274,7 +283,10 @@ fun MainAriseApp(viewModel: AriseViewModel) {
                     viewModel = viewModel,
                     onNavigateToBossRaid = { currentScreen = AriseScreen.DUNGEONS }
                 )
-                AriseScreen.INVENTORY -> InventoryScreen(viewModel = viewModel)
+                AriseScreen.INVENTORY -> InventoryScreen(
+                    viewModel = viewModel,
+                    onNavigateBack = { currentScreen = AriseScreen.DASHBOARD }
+                )
                 AriseScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
             }
         }

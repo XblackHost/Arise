@@ -1153,17 +1153,28 @@ private data class GymVisualTheme(
 
 private fun getGymTheme(gate: SpawnedGate): GymVisualTheme {
     val bId = gate.boss.id.lowercase()
+    val bossRank = gate.boss.rank.lowercase()
+    val gateRank = gate.rank.lowercase()
     return when {
-        gate.rank == "S-Rank" || bId.contains("dragon") || bId.contains("kamish") -> GymVisualTheme(
+        gateRank.contains("monarch") || bId.contains("kamish") || bId.contains("dragon") -> GymVisualTheme(
             primaryColor = Color(0xFFDC2626), // Lava Red
             accentColor = Color(0xFFF59E0B),  // Molten Gold
             beaconColor = Color(0xFFEF4444),
             gymCrest = "🐉",
             stars = "⭐⭐⭐⭐⭐",
-            cpRating = "CP 48,000",
+            cpRating = "CP 50,000",
             gymTypeTitle = "DRAGON CITADEL"
         )
-        gate.rank == "A-Rank" || bId.contains("igris") || bId.contains("kargalgan") -> GymVisualTheme(
+        gateRank.contains("s-rank") || bossRank.contains("s-rank") || bId.contains("silum") -> GymVisualTheme(
+            primaryColor = Color(0xFF0284C7), // Glacial Azure
+            accentColor = Color(0xFFE0F2FE),  // Frost White
+            beaconColor = Color(0xFF38BDF8),
+            gymCrest = "❄️",
+            stars = "⭐⭐⭐⭐⭐",
+            cpRating = "CP 45,000",
+            gymTypeTitle = "GLACIAL CITADEL"
+        )
+        gateRank.contains("a-rank") || bossRank.contains("a-rank") || bId.contains("igris") || bId.contains("kargalgan") -> GymVisualTheme(
             primaryColor = Color(0xFF7C3AED), // Shadow Violet
             accentColor = Color(0xFF06B6D4),  // Neon Monarch Cyan
             beaconColor = Color(0xFF8B5CF6),
@@ -1172,14 +1183,14 @@ private fun getGymTheme(gate: SpawnedGate): GymVisualTheme {
             cpRating = "CP 36,000",
             gymTypeTitle = "MONARCH GYM"
         )
-        gate.rank == "B-Rank" || bId.contains("cerberus") || bId.contains("silum") -> GymVisualTheme(
-            primaryColor = Color(0xFF0284C7), // Glacial Azure
-            accentColor = Color(0xFFE0F2FE),  // Frost White
-            beaconColor = Color(0xFF38BDF8),
-            gymCrest = "🐺",
+        gateRank.contains("b-rank") || bossRank.contains("b-rank") || bId.contains("cerberus") -> GymVisualTheme(
+            primaryColor = Color(0xFFB45309), // Infernal Amber
+            accentColor = Color(0xFFFDE68A),  // Hellfire Yellow
+            beaconColor = Color(0xFFF59E0B),
+            gymCrest = "🔥",
             stars = "⭐⭐⭐",
             cpRating = "CP 24,000",
-            gymTypeTitle = "FROST SANCTUM"
+            gymTypeTitle = "INFERNAL SANCTUM"
         )
         gate.rank == "C-Rank" || bId.contains("arachna") -> GymVisualTheme(
             primaryColor = Color(0xFF059669), // Necrotic Jade

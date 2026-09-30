@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material3.*
@@ -29,8 +31,13 @@ import com.example.viewmodel.AriseViewModel
 
 @Composable
 fun InventoryScreen(
-    viewModel: AriseViewModel
+    viewModel: AriseViewModel,
+    onNavigateBack: () -> Unit = {}
 ) {
+    BackHandler {
+        onNavigateBack()
+    }
+
     val profile by viewModel.playerProfile.collectAsState()
     val allItems by viewModel.equipment.collectAsState()
 
@@ -53,20 +60,30 @@ fun InventoryScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column {
-                        Text(
-                            text = "HUNTER VAULT & EQUIPMENT",
-                            color = AriseGoldRank,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 1.sp
-                        )
-                        Text(
-                            text = "Artifact Armory",
-                            color = AriseTextPrimary,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Black
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onNavigateBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Return",
+                                tint = AriseGoldRank
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Column {
+                            Text(
+                                text = "HUNTER VAULT & EQUIPMENT",
+                                color = AriseGoldRank,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 1.sp
+                            )
+                            Text(
+                                text = "Artifact Armory",
+                                color = AriseTextPrimary,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -102,18 +119,24 @@ fun InventoryScreen(
         }
 
         items(allItems) { item ->
-            EquipmentCard(equipment = item)
+            EquipmentCard(
+                equipment = item,
+                onToggleEquip = { viewModel.toggleEquip(item) }
+            )
         }
     }
 }
 
 @Composable
-fun EquipmentCard(equipment: Equipment) {
+fun EquipmentCard(
+    equipment: Equipment,
+    onToggleEquip: () -> Unit
+) {
     val rarityColor = Color(equipment.rarity.colorHex)
 
     NeonCard(
-        borderColor = rarityColor.copy(alpha = 0.7f),
-        backgroundColor = AriseSurfaceDark,
+        borderColor = if (equipment.isEquipped) AriseEmeraldHeal else rarityColor.copy(alpha = 0.7f),
+        backgroundColor = if (equipment.isEquipped) Color(0xFF0F1E19) else AriseSurfaceDark,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -183,15 +206,20 @@ fun EquipmentCard(equipment: Equipment) {
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            if (equipment.isEquipped) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF064E3B))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text("EQUIPPED", color = AriseEmeraldHeal, fontSize = 10.sp, fontWeight = FontWeight.Black)
-                }
+            Button(
+                onClick = onToggleEquip,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (equipment.isEquipped) Color(0xFF064E3B) else Color(0xFF1E293B)
+                ),
+                shape = RoundedCornerShape(6.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = if (equipment.isEquipped) "EQUIPPED" else "EQUIP",
+                    color = if (equipment.isEquipped) AriseEmeraldHeal else Color.White,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black
+                )
             }
         }
     }

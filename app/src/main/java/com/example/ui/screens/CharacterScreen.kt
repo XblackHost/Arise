@@ -30,7 +30,8 @@ import com.example.viewmodel.AriseViewModel
 @Composable
 fun CharacterScreen(
     viewModel: AriseViewModel,
-    onNavigateToClasses: () -> Unit
+    onNavigateToClasses: () -> Unit,
+    onNavigateToInventory: () -> Unit = {}
 ) {
     val profile by viewModel.playerProfile.collectAsState()
     val equippedGear by viewModel.equipment.collectAsState()
@@ -202,13 +203,53 @@ fun CharacterScreen(
         // Equipped Gear
         item {
             Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "EQUIPPED HUNTER ARTIFACTS",
-                color = AriseCyanNeon,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                letterSpacing = 1.sp
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "EQUIPPED HUNTER ARTIFACTS",
+                    color = AriseCyanNeon,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    letterSpacing = 1.sp
+                )
+                TextButton(onClick = onNavigateToInventory) {
+                    Text("MANAGE ARMORY >", color = AriseGoldRank, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+        }
+
+        if (equippedItems.isEmpty()) {
+            item {
+                NeonCard(
+                    borderColor = AriseBorderGlow,
+                    backgroundColor = AriseSurfaceDark,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "No artifacts equipped. Visit the Armory to equip gear!",
+                            color = AriseTextSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = onNavigateToInventory,
+                            colors = ButtonDefaults.buttonColors(containerColor = AriseGoldRank),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("ARMORY", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
         }
 
         items(equippedItems) { gear ->

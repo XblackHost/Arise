@@ -114,7 +114,7 @@ object BossCatalog {
             shadowSignatureSkill = "Hellfire Howl",
             shadowSkillDesc = "Stuns target and burns battlefield for 3 consecutive turns.",
             lore = "A savage multi-headed beast clad in hellfire scales. When extracted, its loyalty is eternal.",
-            iconEmoji = "🐺",
+            iconEmoji = "🔥",
             recommendedLevel = 4
         ),
         DungeonBoss(

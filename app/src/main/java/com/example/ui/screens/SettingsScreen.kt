@@ -36,7 +36,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val maskedKey by viewModel.maskedApiKey.collectAsState()
-    val hasValidKey = viewModel.apiKeyStorage.hasValidApiKey()
+    val hasValidKey by viewModel.hasValidApiKey.collectAsState()
 
     var showKeyEditor by remember { mutableStateOf(false) }
     var showSpecDialog by remember { mutableStateOf(false) }

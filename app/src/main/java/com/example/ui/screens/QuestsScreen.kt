@@ -163,6 +163,7 @@ fun QuestsScreen(
         CustomQuestDialog(
             onDismiss = { showAddDialog = false },
             onAdd = { newQuest ->
+                viewModel.addCustomQuest(newQuest)
                 showAddDialog = false
             }
         )
@@ -433,11 +434,21 @@ fun CustomQuestDialog(
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
+            val parsedDuration = duration.toIntOrNull()
+            val isDurationValid = parsedDuration != null && parsedDuration in 1..360
+            val isFormValid = title.isNotBlank() && isDurationValid
+
             OutlinedTextField(
                 value = duration,
-                onValueChange = { duration = it },
-                label = { Text("Duration (minutes)") },
-                modifier = Modifier.fillMaxWidth()
+                onValueChange = { duration = it.filter { char -> char.isDigit() } },
+                label = { Text("Duration (minutes: 1 - 360)") },
+                modifier = Modifier.fillMaxWidth(),
+                isError = duration.isNotEmpty() && !isDurationValid,
+                supportingText = {
+                    if (duration.isNotEmpty() && !isDurationValid) {
+                        Text("Duration must be between 1 and 360 minutes", color = Color(0xFFEF4444), fontSize = 11.sp)
+                    }
+                }
             )
             Spacer(modifier = Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
@@ -447,10 +458,10 @@ fun CustomQuestDialog(
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
                     onClick = {
-                        val dur = duration.toIntOrNull() ?: 15
+                        val dur = parsedDuration ?: 15
                         val q = Quest(
-                            title = title,
-                            description = description,
+                            title = title.trim(),
+                            description = description.trim(),
                             category = QuestCategory.FITNESS,
                             difficulty = QuestDifficulty.D,
                             xpReward = 60,
@@ -464,9 +475,13 @@ fun CustomQuestDialog(
                         )
                         onAdd(q)
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = AriseCyanNeon)
+                    enabled = isFormValid,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AriseCyanNeon,
+                        disabledContainerColor = Color(0xFF1E293B)
+                    )
                 ) {
-                    Text("ADD QUEST", color = AriseVoidBlack, fontWeight = FontWeight.Bold)
+                    Text("ADD QUEST", color = if (isFormValid) AriseVoidBlack else AriseTextSecondary, fontWeight = FontWeight.Bold)
                 }
             }
         }

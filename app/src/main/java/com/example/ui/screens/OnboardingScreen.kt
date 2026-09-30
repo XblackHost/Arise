@@ -34,7 +34,6 @@ fun OnboardingScreen(
     var hunterName by remember { mutableStateOf("Jin-Woo") }
     var selectedClassId by remember { mutableStateOf("warrior") }
     var selectedGoal by remember { mutableStateOf("Fitness & Calisthenics") }
-    var selectedDifficulty by remember { mutableStateOf("Intermediate") }
 
     val starterClasses = remember {
         listOf(

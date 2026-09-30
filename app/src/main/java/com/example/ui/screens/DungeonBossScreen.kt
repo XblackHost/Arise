@@ -39,6 +39,7 @@ fun DungeonBossScreen(
     viewModel: AriseViewModel
 ) {
     val battleState by viewModel.battleState.collectAsState()
+    val profile by viewModel.playerProfile.collectAsState()
     val allBosses = remember { BossCatalog.allBosses }
 
     if (battleState.inBattle && battleState.currentBoss != null) {
@@ -46,6 +47,7 @@ fun DungeonBossScreen(
     } else {
         BossSelectionView(
             bosses = allBosses,
+            playerLevel = profile?.level ?: 1,
             onSelectBoss = { boss -> viewModel.startBossBattle(boss) }
         )
     }
@@ -54,8 +56,11 @@ fun DungeonBossScreen(
 @Composable
 fun BossSelectionView(
     bosses: List<DungeonBoss>,
+    playerLevel: Int = 1,
     onSelectBoss: (DungeonBoss) -> Unit
 ) {
+    var warningBossToEnter by remember { mutableStateOf<DungeonBoss?>(null) }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -149,27 +154,93 @@ fun BossSelectionView(
                             Text("Weak: ${boss.weakness}", color = AriseCyanNeon, fontSize = 11.sp)
                         }
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Extracts as: ${boss.shadowUnitTitle}",
-                            color = AriseShadowViolet,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Extracts as: ${boss.shadowUnitTitle}",
+                                color = AriseShadowViolet,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            val isUnderleveled = playerLevel < boss.recommendedLevel
+                            Text(
+                                text = if (isUnderleveled) "⚠️ Req. Lv.${boss.recommendedLevel}" else "✓ Req. Lv.${boss.recommendedLevel}",
+                                color = if (isUnderleveled) Color(0xFFF59E0B) else AriseEmeraldHeal,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                val isUnderleveled = playerLevel < boss.recommendedLevel
                 Button(
-                    onClick = { onSelectBoss(boss) },
+                    onClick = {
+                        if (isUnderleveled) {
+                            warningBossToEnter = boss
+                        } else {
+                            onSelectBoss(boss)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF991B1B)),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isUnderleveled) Color(0xFF7F1D1D) else Color(0xFF991B1B)
+                    ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("ENTER DUNGEON GATE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(
+                        text = if (isUnderleveled) "⚠️ CHALLENGE GATE (UNDERLEVELED)" else "ENTER DUNGEON GATE",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
                 }
             }
         }
+    }
+
+    warningBossToEnter?.let { boss ->
+        AlertDialog(
+            onDismissRequest = { warningBossToEnter = null },
+            title = {
+                Text(
+                    text = "⚠️ HIGH-RANK INCURSION WARNING",
+                    color = Color(0xFFEF4444),
+                    fontWeight = FontWeight.Black,
+                    fontSize = 15.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Gate: '${boss.name}' (${boss.rank})\nRecommended Level: Lv.${boss.recommendedLevel}\nYour Hunter Level: Lv.$playerLevel\n\nFacing this sovereign while underleveled will deal extreme damage. Proceed into the gate?",
+                    color = AriseTextPrimary,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val chosen = boss
+                        warningBossToEnter = null
+                        onSelectBoss(chosen)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) {
+                    Text("ENTER ANYWAY", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { warningBossToEnter = null }) {
+                    Text("ABORT", color = AriseTextSecondary)
+                }
+            },
+            containerColor = AriseDeepNavy
+        )
     }
 }
 
@@ -293,16 +364,16 @@ fun ActiveBossCombatView(
         ) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatProgressBar(
-                    label = "HUNTER HP",
+                    label = "HUNTER HP (${state.playerCurrentHp}/${state.playerMaxHp})",
                     currentValue = state.playerCurrentHp,
-                    maxValue = 120,
+                    maxValue = state.playerMaxHp,
                     fillColor = AriseEmeraldHeal,
                     modifier = Modifier.weight(1f)
                 )
                 StatProgressBar(
-                    label = "MANA (MP)",
+                    label = "MANA MP (${state.playerCurrentMp}/${state.playerMaxMp})",
                     currentValue = state.playerCurrentMp,
-                    maxValue = 60,
+                    maxValue = state.playerMaxMp,
                     fillColor = AriseBlueMana,
                     modifier = Modifier.weight(1f)
                 )
