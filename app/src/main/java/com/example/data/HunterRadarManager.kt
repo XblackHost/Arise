@@ -103,6 +103,7 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
     private var lastRawStepCounterValue = -1
     private var hasHardwareStepSensor = false
     private var lastPhysicalStepTimeMs = 0L
+    private var _hasUserAnchoredWorld = false
 
     // Accelerometer-based Automatic Step Detection Filter
     private var filteredGravity = 9.81f
@@ -150,23 +151,32 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
             Log.w(TAG, "Failed to start location updates: ${e.message}")
         }
 
-        // Register All Step and Orientation Sensors
+        // Register Step and Orientation Sensors with strict priority to prevent double-counting
         try {
             sensorManager?.let { sm ->
-                // 1. Hardware Step Counter
-                sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let {
-                    hasHardwareStepSensor = true
+                // BUG-01: Priority 1 - Hardware Step Counter
+                val hasStepCounter = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let {
                     sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+                    true
+                } ?: false
+
+                // Priority 2 - Hardware Step Detector (only if Step Counter is absent)
+                val hasStepDetector = if (!hasStepCounter) {
+                    sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let {
+                        sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+                        true
+                    } ?: false
+                } else false
+
+                hasHardwareStepSensor = hasStepCounter || hasStepDetector
+
+                // Priority 3 - Accelerometer (Fallback automatic step detection ONLY when neither hardware sensor exists)
+                if (!hasHardwareStepSensor) {
+                    sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
+                        sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+                    }
                 }
-                // 2. Hardware Step Detector
-                sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let {
-                    hasHardwareStepSensor = true
-                    sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-                }
-                // 3. Accelerometer (Fallback automatic step detection on phones without hardware pedometer)
-                sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
-                    sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
-                }
+
                 // 4. Rotation Vector for real-time 3D compass heading
                 sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)?.let {
                     sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
@@ -193,12 +203,16 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
     }
 
     override fun onLocationChanged(location: Location) {
+        // BUG-02: Reject inaccurate fixes (accuracy > 30m) entirely to prevent erratic jumps
+        if (location.hasAccuracy() && location.accuracy > 30f) return
+
         val wasGpsFix = _hasGpsFix.value
         _hasGpsFix.value = true
         val now = System.currentTimeMillis()
 
-        // R1: When transitioning from no GPS fix to first live GPS fix, re-anchor gates to true user location
-        if (!wasGpsFix) {
+        // BUG-03 / R1: When transitioning to live GPS fix or first anchor, re-anchor gates to true user location
+        if (!wasGpsFix || !_hasUserAnchoredWorld) {
+            _hasUserAnchoredWorld = true
             _currentLatitude.value = location.latitude
             _currentLongitude.value = location.longitude
             refreshSpawnedGates()
@@ -211,43 +225,47 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
             val deltaMeters = calculateDistanceMeters(prev.latitude, prev.longitude, location.latitude, location.longitude)
             val timeDeltaSec = ((now - lastLocationTimeMs) / 1000f).coerceAtLeast(0.5f)
 
-            if (deltaMeters in 0.5f..250.0f) { // Real human physical movement
-                val addedFeet = deltaMeters * FEET_PER_METER
-                _sessionFeet.value += addedFeet
-                _sessionMeters.value += deltaMeters
-
-                // Speed calculation
-                val speed = if (location.hasSpeed() && location.speed > 0.1f) {
-                    location.speed
-                } else {
-                    (deltaMeters / timeDeltaSec).coerceIn(0f, 15f)
+            when {
+                deltaMeters < 2.0f -> {
+                    // BUG-02: Below noise floor (2.0m) — standing still, prevents GPS jitter accumulation
+                    _walkingSpeedMps.value = 0f
+                    _isWalking.value = false
                 }
-                _walkingSpeedMps.value = speed
-                _isWalking.value = speed >= 0.35f
+                deltaMeters in 2.0f..250.0f -> {
+                    // Real human physical movement
+                    val addedFeet = deltaMeters * FEET_PER_METER
+                    _sessionFeet.value += addedFeet
+                    _sessionMeters.value += deltaMeters
 
-                // Direction / Bearing calculation (faces the way the player is walking)
-                val bearing = if (location.hasBearing() && location.bearing != 0f) {
-                    location.bearing
-                } else {
-                    calculateBearing(prev.latitude, prev.longitude, location.latitude, location.longitude)
-                }
-                _playerBearing.value = bearing
+                    // Speed calculation
+                    val speed = if (location.hasSpeed() && location.speed > 0.1f) {
+                        location.speed
+                    } else {
+                        (deltaMeters / timeDeltaSec).coerceIn(0f, 15f)
+                    }
+                    _walkingSpeedMps.value = speed
+                    _isWalking.value = speed >= 0.35f
 
-                // Fallback steps ONLY if no physical pedometer/accelerometer step events occurred recently
-                // (e.g. running on an emulator or simulated GPS without sensor pulses)
-                val timeSinceSensorStep = now - lastPhysicalStepTimeMs
-                if (timeSinceSensorStep > 3500L) {
-                    val addedSteps = (deltaMeters / 0.762f).roundToInt().coerceAtLeast(1)
-                    _sessionSteps.value += addedSteps
-                    _burnedCalories.value = _sessionSteps.value * 0.04f
+                    // Direction / Bearing calculation (faces the way the player is walking)
+                    val bearing = if (location.hasBearing() && location.bearing != 0f) {
+                        location.bearing
+                    } else {
+                        calculateBearing(prev.latitude, prev.longitude, location.latitude, location.longitude)
+                    }
+                    _playerBearing.value = bearing
+
+                    // Fallback steps ONLY if no physical pedometer/accelerometer step events occurred recently
+                    val timeSinceSensorStep = now - lastPhysicalStepTimeMs
+                    if (timeSinceSensorStep > 3500L) {
+                        val addedSteps = (deltaMeters / 0.762f).roundToInt().coerceAtLeast(1)
+                        _sessionSteps.value += addedSteps
+                        _burnedCalories.value = _sessionSteps.value * 0.04f
+                    }
                 }
-            } else if (deltaMeters < 0.3f) {
-                // Standing still
-                _walkingSpeedMps.value = 0f
-                _isWalking.value = false
-            } else {
-                // R4: Teleport / Glitch jump (> 250m or erratic jump)
-                isWithinDisplacementWindow = false
+                else -> {
+                    // R4: Teleport / Glitch jump (> 250m) — ignore displacement
+                    isWithinDisplacementWindow = false
+                }
             }
         } else if (location.hasBearing()) {
             _playerBearing.value = location.bearing
@@ -310,8 +328,8 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
             }
 
             Sensor.TYPE_ACCELEROMETER -> {
-                // If hardware step sensor is actively reporting, skip accelerometer to prevent double counting
-                if (hasHardwareStepSensor && lastRawStepCounterValue >= 0) return
+                // If hardware step sensor is present, skip accelerometer to prevent double counting
+                if (hasHardwareStepSensor) return
 
                 // High-precision physical step detection from real movement / walking
                 val x = event.values[0]
