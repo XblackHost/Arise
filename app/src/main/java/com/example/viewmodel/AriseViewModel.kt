@@ -8,10 +8,12 @@ import com.example.data.AriseDatabase
 import com.example.data.BossCatalog
 import com.example.data.DungeonBoss
 import com.example.data.HunterRadarManager
+import com.example.data.JoinResult
 import com.example.data.LanMultiplayerManager
 import com.example.data.model.*
 import com.example.security.ApiKeyStorage
 import androidx.room.withTransaction
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class ActiveBattleShadow(
     val id: Long,
@@ -125,7 +128,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     val isWalking: StateFlow<Boolean> = radarManager.isWalking
 
     // LAN / Wi-Fi Multiplayer Squadron Manager
-    val multiplayerManager = LanMultiplayerManager()
+    val multiplayerManager = LanMultiplayerManager(application)
     val currentParty: StateFlow<HunterParty?> = multiplayerManager.currentParty
     val discoveredParties: StateFlow<List<DiscoveredParty>> = multiplayerManager.discoveredParties
     val isBeaconActive: StateFlow<Boolean> = multiplayerManager.isBeaconActive
@@ -134,10 +137,48 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     private val _isNyxReplying = MutableStateFlow(false)
     val isNyxReplying: StateFlow<Boolean> = _isNyxReplying.asStateFlow()
 
+    init {
+        // STILL-16: Daily Quest Reset on New Day
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val prefs = getApplication<Application>().getSharedPreferences("arise_daily_tracker", Context.MODE_PRIVATE)
+                val currentDay = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+                val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+                val todayCode = currentYear * 1000 + currentDay
+                val lastResetCode = prefs.getInt("last_daily_reset_code", -1)
+                if (lastResetCode != todayCode) {
+                    db.questDao().resetDailyQuests()
+                    prefs.edit().putInt("last_daily_reset_code", todayCode).apply()
+                }
+            } catch (e: Exception) {
+                // Non-critical daily reset catch
+            }
+        }
+
+        // STILL-17: Auto-complete physical walking / steps quests when distance threshold is reached
+        viewModelScope.launch {
+            radarManager.sessionMeters.collect { meters ->
+                if (meters >= 500f) {
+                    val activeQuests = quests.value.filter { !it.isCompleted && it.verificationType == VerificationType.STEPS }
+                    for (q in activeQuests) {
+                        val titleLower = q.title.lowercase()
+                        if (titleLower.contains("1.5 km") && meters >= 1500f) {
+                            completeQuest(q)
+                        } else if (titleLower.contains("1 km") && meters >= 1000f) {
+                            completeQuest(q)
+                        } else if (titleLower.contains("500 m") && meters >= 500f) {
+                            completeQuest(q)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         radarManager.stopTracking()
-        multiplayerManager.stopListening()
+        multiplayerManager.shutdown()
     }
 
     // ----------------------------------------------------
@@ -271,7 +312,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             while (newXp >= newReqXp) {
                 newXp -= newReqXp
                 newLevel += 1
-                newReqXp = maxOf((newReqXp * 1.35).toInt(), newReqXp + 1)
+                newReqXp = maxOf((newReqXp * 1.35).toInt(), newReqXp + 1).coerceAtMost(Int.MAX_VALUE / 2)
                 newStatPoints += 3
                 newMaxHp += 20
                 newHp = newMaxHp
@@ -297,6 +338,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 unallocatedStatPoints = newStatPoints,
                 gold = profile.gold + quest.goldReward,
                 totalQuestsCompleted = profile.totalQuestsCompleted + 1,
+                totalWorkouts = profile.totalWorkouts + 1,
                 rank = determineRank(newLevel)
             )
 
@@ -931,7 +973,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             while (newXp >= newReqXp) {
                 newXp -= newReqXp
                 newLevel += 1
-                newReqXp = maxOf((newReqXp * 1.35).toInt(), newReqXp + 1)
+                newReqXp = maxOf((newReqXp * 1.35).toInt(), newReqXp + 1).coerceAtMost(Int.MAX_VALUE / 2)
                 newStatPoints += 3
                 didLevelUp = true
             }
@@ -943,6 +985,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     requiredXp = newReqXp,
                     gold = p.gold + goldGain,
                     unallocatedStatPoints = newStatPoints,
+                    totalWorkouts = p.totalWorkouts + 1,
                     rank = determineRank(newLevel)
                 )
             )
@@ -962,7 +1005,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 while (currXp >= sReq) {
                     currXp -= sReq
                     sLevel += 1
-                    sReq = maxOf((sReq * 1.35f).toInt(), sReq + 1)
+                    sReq = maxOf((sReq * 1.35f).toInt(), sReq + 1).coerceAtMost(Int.MAX_VALUE / 2)
                     sMaxHp = (sMaxHp * 1.10f).toInt()
                     sAtk = (sAtk * 1.08f).toInt()
                     sDef = (sDef * 1.06f).toInt()
@@ -989,12 +1032,15 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
 
     fun endBattle() {
         val state = _battleState.value
-        _battleState.value = BattleState()
-        if (state.inBattle) {
-            val playerHp = state.playerCurrentHp
-            val playerMp = state.playerCurrentMp
-            val isDefeat = state.isDefeat
-            viewModelScope.launch(Dispatchers.IO) {
+        if (!state.inBattle) {
+            _battleState.value = BattleState()
+            return
+        }
+        val playerHp = state.playerCurrentHp
+        val playerMp = state.playerCurrentMp
+        val isDefeat = state.isDefeat
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
                 val p = db.playerDao().getPlayerProfileOnce()
                 if (p != null) {
                     val endHp = if (isDefeat) 1.coerceAtMost(p.maxHp) else playerHp.coerceIn(1, p.maxHp)
@@ -1002,6 +1048,8 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     db.playerDao().updateProfile(p.copy(hp = endHp, mp = endMp))
                 }
             }
+            // Reset battle state only AFTER database profile write completes to prevent race conditions
+            _battleState.value = BattleState()
         }
     }
 
@@ -1085,17 +1133,18 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         multiplayerManager.joinParty(discovered, p)
     }
 
-    fun joinPartyByCode(code: String) {
+    fun joinPartyByCode(code: String, onResult: (JoinResult) -> Unit = {}) {
         val p = playerProfile.value ?: return
-        multiplayerManager.joinByCode(code, p)
+        val result = multiplayerManager.joinByCode(code, p)
+        onResult(result)
     }
 
     fun leaveMultiplayerParty() {
         multiplayerManager.leaveParty()
     }
 
-    fun startCoopRaid() {
-        multiplayerManager.startCoopRaid()
+    fun startCoopRaid(forceSolo: Boolean = false): Boolean {
+        return multiplayerManager.startCoopRaid(forceSolo)
     }
 
     fun performCoopAttack(skillType: String) {
@@ -1112,7 +1161,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 while (newXp >= newReq) {
                     newXp -= newReq
                     newLevel += 1
-                    newReq = (newReq * 1.35).toInt()
+                    newReq = (newReq * 1.35).toInt().coerceAtMost(Int.MAX_VALUE / 2)
                     newStatPoints += 3
                     didLevelUp = true
                 }

@@ -202,6 +202,25 @@ fun EquipmentCard(
                     if (equipment.hpBonus > 0) Text("+${equipment.hpBonus} HP", color = AriseGoldRank, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     if (equipment.speedBonus > 0) Text("+${equipment.speedBonus} SPD", color = AriseShadowViolet, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
+
+                if (!equipment.specialEffect.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "⚡ ${equipment.specialEffect}",
+                        color = Color(0xFFFBBF24),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                if (equipment.valueGold > 0) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "🪙 ${equipment.valueGold} Gold",
+                        color = AriseGoldRank,
+                        fontSize = 10.sp
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))

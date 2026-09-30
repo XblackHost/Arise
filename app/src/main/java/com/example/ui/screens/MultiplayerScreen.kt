@@ -36,7 +36,7 @@ import com.example.viewmodel.AriseViewModel
 enum class MultiplayerTab(val label: String) {
     SQUAD_LOBBY("Squadron Lobby"),
     LAN_DISCOVERY("Local Wi-Fi Radar"),
-    GUILD_ROSTER("Hunter Association")
+    GUILD_ROSTER("Simulated Rankings (Demo)")
 }
 
 @Composable
@@ -52,6 +52,7 @@ fun MultiplayerScreen(
     var selectedTab by remember { mutableStateOf(MultiplayerTab.SQUAD_LOBBY) }
     var showCreatePartyDialog by remember { mutableStateOf(false) }
     var joinCodeInput by remember { mutableStateOf("") }
+    var joinError by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(
         modifier = Modifier
@@ -128,9 +129,14 @@ fun MultiplayerScreen(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
+                        val beaconText = when {
+                            party != null -> "SQUAD LOBBY: ${party?.roomCode}"
+                            isBeaconActive -> "LOCAL NETWORK BEACON: ACTIVE"
+                            else -> "LAN DISCOVERY: IDLE"
+                        }
                         Text(
-                            text = if (party != null) "SQUAD LOBBY: ${party?.roomCode}" else "LOCAL NETWORK BEACON: ACTIVE",
-                            color = if (party != null) AriseCyanNeon else AriseEmeraldHeal,
+                            text = beaconText,
+                            color = if (party != null) AriseCyanNeon else if (isBeaconActive) AriseEmeraldHeal else AriseTextSecondary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -256,7 +262,20 @@ fun MultiplayerScreen(
                                 Button(
                                     onClick = {
                                         if (joinCodeInput.isNotBlank()) {
-                                            viewModel.joinPartyByCode(joinCodeInput)
+                                            viewModel.joinPartyByCode(joinCodeInput) { result ->
+                                                when (result) {
+                                                    is com.example.data.JoinResult.Success -> {
+                                                        joinCodeInput = ""
+                                                        joinError = null
+                                                    }
+                                                    is com.example.data.JoinResult.NotFound -> {
+                                                        joinError = "Squadron '${result.code}' not found on local network."
+                                                    }
+                                                    is com.example.data.JoinResult.Error -> {
+                                                        joinError = result.message
+                                                    }
+                                                }
+                                            }
                                         }
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = AriseDeepNavy),
@@ -264,6 +283,16 @@ fun MultiplayerScreen(
                                 ) {
                                     Text("JOIN", color = AriseCyanNeon, fontWeight = FontWeight.Bold)
                                 }
+                            }
+
+                            if (joinError != null) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "⚠️ $joinError",
+                                    color = AriseCrimson,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
                         }
                     }

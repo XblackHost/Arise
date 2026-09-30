@@ -28,6 +28,7 @@ class ApiKeyStorage(private val context: Context) {
         private const val KEY_USER_NAME = "vault_player_name"
         private const val CIPHER_ALGO = "AES/CBC/PKCS5Padding"
         private const val FIXED_SALT = "ARISE_SHADOW_SYSTEM_2026_VAULT"
+        private const val V2_PREFIX = "v2:"
     }
 
     private fun getSecretKey(): SecretKeySpec {
@@ -36,13 +37,13 @@ class ApiKeyStorage(private val context: Context) {
         return SecretKeySpec(keyBytes, "AES")
     }
 
-    private fun getIv(): IvParameterSpec {
-        val ivBytes = ByteArray(16) { 0x41 } // "A" filled 16-byte fixed IV for deterministic local app vault
+    private fun getLegacyIv(): IvParameterSpec {
+        val ivBytes = ByteArray(16) { 0x41 }
         return IvParameterSpec(ivBytes)
     }
 
     /**
-     * Stores the Gemini API key encrypted in local private storage.
+     * Stores the Gemini API key encrypted in local private storage using dynamic random IV.
      */
     fun saveApiKey(rawKey: String) {
         val trimmed = rawKey.trim()
@@ -51,10 +52,12 @@ class ApiKeyStorage(private val context: Context) {
             return
         }
         try {
+            val randomIvBytes = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
             val cipher = Cipher.getInstance(CIPHER_ALGO)
-            cipher.init(Cipher.ENCRYPT_MODE, getSecretKey(), getIv())
+            cipher.init(Cipher.ENCRYPT_MODE, getSecretKey(), IvParameterSpec(randomIvBytes))
             val encryptedBytes = cipher.doFinal(trimmed.toByteArray(StandardCharsets.UTF_8))
-            val encoded = Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
+            val combined = randomIvBytes + encryptedBytes
+            val encoded = V2_PREFIX + Base64.encodeToString(combined, Base64.NO_WRAP)
             prefs.edit()
                 .putString(KEY_ENCRYPTED_API_KEY, encoded)
                 .putBoolean(KEY_FIRST_LAUNCH_COMPLETED, true)
@@ -69,33 +72,49 @@ class ApiKeyStorage(private val context: Context) {
     }
 
     /**
-     * Retrieves the stored API key, or falls back to BuildConfig.GEMINI_API_KEY if available.
+     * Retrieves the stored API key.
      */
     fun getApiKey(): String {
         val encoded = prefs.getString(KEY_ENCRYPTED_API_KEY, null)
         if (!encoded.isNullOrEmpty()) {
-            try {
-                val cipher = Cipher.getInstance(CIPHER_ALGO)
-                cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), getIv())
-                val decodedBytes = Base64.decode(encoded, Base64.NO_WRAP)
-                val decrypted = String(cipher.doFinal(decodedBytes), StandardCharsets.UTF_8)
-                if (decrypted.isNotBlank()) return decrypted
-            } catch (e: Exception) {
-                // Try fallback decoding
+            if (encoded.startsWith(V2_PREFIX)) {
                 try {
-                    val fallback = String(Base64.decode(encoded, Base64.NO_WRAP), StandardCharsets.UTF_8)
-                    if (fallback.isNotBlank()) return fallback
-                } catch (_: Exception) { }
+                    val rawCombined = Base64.decode(encoded.removePrefix(V2_PREFIX), Base64.NO_WRAP)
+                    if (rawCombined.size > 16) {
+                        val ivBytes = rawCombined.copyOfRange(0, 16)
+                        val cipherBytes = rawCombined.copyOfRange(16, rawCombined.size)
+                        val cipher = Cipher.getInstance(CIPHER_ALGO)
+                        cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), IvParameterSpec(ivBytes))
+                        val decrypted = String(cipher.doFinal(cipherBytes), StandardCharsets.UTF_8)
+                        if (decrypted.isNotBlank()) return decrypted
+                    }
+                } catch (e: Exception) {
+                    // Ignore and try fallback
+                }
+            } else {
+                // Legacy v1 format with fixed IV
+                try {
+                    val cipher = Cipher.getInstance(CIPHER_ALGO)
+                    cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), getLegacyIv())
+                    val decodedBytes = Base64.decode(encoded, Base64.NO_WRAP)
+                    val decrypted = String(cipher.doFinal(decodedBytes), StandardCharsets.UTF_8)
+                    if (decrypted.isNotBlank()) {
+                        // Migrate to V2 format automatically
+                        saveApiKey(decrypted)
+                        return decrypted
+                    }
+                } catch (e: Exception) {
+                    // Try plain base64 fallback
+                    try {
+                        val fallback = String(Base64.decode(encoded, Base64.NO_WRAP), StandardCharsets.UTF_8)
+                        if (fallback.isNotBlank()) return fallback
+                    } catch (_: Exception) { }
+                }
             }
         }
 
-        // Optional fallback to BuildConfig if injected via Secrets Gradle Plugin
-        val buildKey = try {
-            BuildConfig.GEMINI_API_KEY
-        } catch (e: Throwable) {
-            ""
-        }
-        return if (buildKey.isNotBlank() && buildKey != "MY_GEMINI_API_KEY") buildKey else ""
+        // STILL-07: Do not fallback to BuildConfig. Users must enter their own key.
+        return ""
     }
 
     /**

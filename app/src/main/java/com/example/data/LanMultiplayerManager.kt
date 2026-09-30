@@ -1,6 +1,10 @@
 package com.example.data
 
+import android.content.Context
+import android.net.wifi.WifiManager
 import android.util.Log
+import com.example.data.BossCatalog
+import com.example.data.DungeonBoss
 import com.example.data.model.DiscoveredParty
 import com.example.data.model.HunterParty
 import com.example.data.model.PartyMember
@@ -13,18 +17,52 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.NetworkInterface
 import java.util.UUID
 import kotlin.random.Random
 
-class LanMultiplayerManager {
+sealed class JoinResult {
+    object Success : JoinResult()
+    data class NotFound(val code: String) : JoinResult()
+    data class Error(val message: String) : JoinResult()
+}
+
+class LanMultiplayerManager(private val context: Context) {
 
     companion object {
         private const val TAG = "LanMultiplayer"
-        private const val UDP_PORT = 8888
+        private val CANDIDATE_PORTS = listOf(8888, 8889, 8890, 8891)
         private const val BROADCAST_IP = "255.255.255.255"
+        private const val MULTIPLAYER_BOSS_HP_MULTIPLIER = 2.2f // Tuned for 4-member squad
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val wifiManager = try {
+        context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+    } catch (e: Exception) { null }
+
+    private val multicastLock = try {
+        wifiManager?.createMulticastLock("arise-multi")?.apply { setReferenceCounted(false) }
+    } catch (e: Exception) { null }
+
+    private val wifiLock = try {
+        wifiManager?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "arise-wifi")?.apply { setReferenceCounted(false) }
+    } catch (e: Exception) { null }
+
+    fun acquireLocks() {
+        try {
+            multicastLock?.acquire()
+            wifiLock?.acquire()
+        } catch (ignored: Exception) {}
+    }
+
+    fun releaseLocks() {
+        try {
+            if (multicastLock?.isHeld == true) multicastLock.release()
+            if (wifiLock?.isHeld == true) wifiLock.release()
+        } catch (ignored: Exception) {}
+    }
 
     private val _currentParty = MutableStateFlow<HunterParty?>(null)
     val currentParty: StateFlow<HunterParty?> = _currentParty.asStateFlow()
@@ -37,6 +75,8 @@ class LanMultiplayerManager {
 
     private var broadcastJob: Job? = null
     private var listenJob: Job? = null
+
+    @Volatile
     private var activeSocket: DatagramSocket? = null
 
     init {
@@ -68,15 +108,28 @@ class LanMultiplayerManager {
 
     fun startListening() {
         if (listenJob?.isActive == true) return
+        acquireLocks()
         listenJob = scope.launch(Dispatchers.IO) {
-            try {
-                val socket = DatagramSocket(UDP_PORT).apply {
-                    broadcast = true
-                    soTimeout = 4000
+            var socket: DatagramSocket? = null
+            for (port in CANDIDATE_PORTS) {
+                try {
+                    socket = DatagramSocket(port).apply {
+                        broadcast = true
+                        soTimeout = 4000
+                    }
+                    break
+                } catch (e: Exception) {
+                    // Try next candidate port
                 }
-                activeSocket = socket
-                val buffer = ByteArray(1024)
+            }
+            if (socket == null) {
+                Log.w(TAG, "No candidate UDP ports available for LAN discovery")
+                return@launch
+            }
+            activeSocket = socket
+            val buffer = ByteArray(1024)
 
+            try {
                 while (isActive) {
                     try {
                         val packet = DatagramPacket(buffer, buffer.size)
@@ -89,13 +142,11 @@ class LanMultiplayerManager {
                         // socket timeout or non-critical packet drop
                     }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "LAN listener initialization notice: ${e.message}")
             } finally {
                 try {
-                    activeSocket?.close()
-                    activeSocket = null
+                    socket.close()
                 } catch (ignored: Exception) {}
+                activeSocket = null
             }
         }
     }
@@ -109,6 +160,30 @@ class LanMultiplayerManager {
             activeSocket?.close()
             activeSocket = null
         } catch (ignored: Exception) {}
+    }
+
+    fun shutdown() {
+        stopListening()
+        stopBroadcasting()
+        releaseLocks()
+        scope.cancel()
+    }
+
+    private fun resolveBroadcastAddress(): InetAddress? {
+        return try {
+            val nifs = NetworkInterface.getNetworkInterfaces()
+            while (nifs.hasMoreElements()) {
+                val nif = nifs.nextElement()
+                if (!nif.isUp || nif.isLoopback) continue
+                for (ia in nif.interfaceAddresses) {
+                    val bcast = ia.broadcast
+                    if (bcast != null) return bcast
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun parseDiscoveredParty(payload: String, ip: String) {
@@ -166,7 +241,7 @@ class LanMultiplayerManager {
         )
 
         // Scale boss HP for multiplayer raid
-        val scaledBossHp = (targetBoss.maxHp * 2.2).toInt()
+        val scaledBossHp = (targetBoss.maxHp * MULTIPLAYER_BOSS_HP_MULTIPLIER).toInt()
 
         val party = HunterParty(
             roomId = UUID.randomUUID().toString(),
@@ -282,7 +357,7 @@ class LanMultiplayerManager {
             avatarEmoji = "🗡️"
         )
 
-        val scaledHp = (boss.maxHp * 2.2).toInt()
+        val scaledHp = (boss.maxHp * MULTIPLAYER_BOSS_HP_MULTIPLIER).toInt()
         val joinedParty = HunterParty(
             roomId = UUID.randomUUID().toString(),
             roomCode = discovered.roomCode,
@@ -304,25 +379,11 @@ class LanMultiplayerManager {
         return true
     }
 
-    fun joinByCode(code: String, playerProfile: PlayerProfile): Boolean {
+    fun joinByCode(code: String, playerProfile: PlayerProfile): JoinResult {
         val cleanCode = code.trim().uppercase()
         val matching = _discoveredParties.value.find { it.roomCode.equals(cleanCode, ignoreCase = true) }
-        return if (matching != null) {
-            joinParty(matching, playerProfile)
-        } else {
-            // Generate squad room with entered code
-            val defaultBoss = BossCatalog.allBosses[0]
-            val synthetic = DiscoveredParty(
-                roomCode = cleanCode,
-                partyName = "Strike Force $cleanCode",
-                leaderName = "Senior Hunter Woo",
-                leaderRank = "B-Rank",
-                targetBoss = defaultBoss.name,
-                memberCount = 1,
-                maxMembers = 4
-            )
-            joinParty(synthetic, playerProfile)
-        }
+            ?: return JoinResult.NotFound(cleanCode)
+        return if (joinParty(matching, playerProfile)) JoinResult.Success else JoinResult.Error("Could not join party $cleanCode")
     }
 
     fun leaveParty() {
@@ -330,8 +391,11 @@ class LanMultiplayerManager {
         _currentParty.value = null
     }
 
-    fun startCoopRaid() {
-        val party = _currentParty.value ?: return
+    fun startCoopRaid(forceSolo: Boolean = false): Boolean {
+        val party = _currentParty.value ?: return false
+        if (!forceSolo && party.members.size < 2) {
+            return false
+        }
         _currentParty.value = party.copy(
             isRaidActive = true,
             isVictory = false,
@@ -341,6 +405,7 @@ class LanMultiplayerManager {
                 action = "⚔️ ALLIANCE GATE INVASION INITIATED against ${party.targetBossName}! Unleash coordinated skills!"
             )
         )
+        return true
     }
 
     fun performPartyCombatTurn(
@@ -443,18 +508,21 @@ class LanMultiplayerManager {
 
     private fun startBroadcasting(party: HunterParty) {
         stopBroadcasting()
+        acquireLocks()
         _isBeaconActive.value = true
         broadcastJob = scope.launch {
             try {
                 val socket = DatagramSocket().apply { broadcast = true }
-                val targetAddress = InetAddress.getByName(BROADCAST_IP)
+                val targetAddress = resolveBroadcastAddress() ?: InetAddress.getByName(BROADCAST_IP)
                 val payload = "ARISE_LOBBY|${party.roomCode}|${party.name}|${party.leaderName}|A-Rank|${party.targetBossName}|${party.members.size}|${party.maxMembers}"
                 val bytes = payload.toByteArray()
 
                 while (isActive) {
                     try {
-                        val packet = DatagramPacket(bytes, bytes.size, targetAddress, UDP_PORT)
-                        socket.send(packet)
+                        for (port in CANDIDATE_PORTS) {
+                            val packet = DatagramPacket(bytes, bytes.size, targetAddress, port)
+                            socket.send(packet)
+                        }
                     } catch (e: Exception) {
                         // ignore network drop
                     }

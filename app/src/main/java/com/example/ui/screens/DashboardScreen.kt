@@ -52,6 +52,8 @@ fun DashboardScreen(
     val allQuests by viewModel.quests.collectAsState()
     val activeQuests = allQuests.filter { !it.isCompleted }.take(3)
     val shadows by viewModel.shadowArmy.collectAsState()
+    val allTasks by viewModel.tasks.collectAsState()
+    val pendingTasks = allTasks.filter { !it.isCompleted }
 
     LazyColumn(
         modifier = Modifier
@@ -360,6 +362,84 @@ fun DashboardScreen(
         } else {
             items(activeQuests) { quest ->
                 QuestMiniCard(quest = quest, onComplete = { viewModel.completeQuest(quest) })
+            }
+        }
+
+        // STILL-15: Today's Discipline Tasks Section
+        if (pendingTasks.isNotEmpty()) {
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "DISCIPLINE CHECKLIST (${pendingTasks.size})",
+                        color = AriseGoldRank,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 13.sp,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
+
+            items(pendingTasks) { task ->
+                TaskMiniCard(
+                    task = task,
+                    onComplete = { viewModel.completeTask(task) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TaskMiniCard(task: com.example.data.model.TaskItem, onComplete: () -> Unit) {
+    NeonCard(
+        borderColor = AriseGoldRank.copy(alpha = 0.4f),
+        backgroundColor = AriseSurfaceDark,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = AriseGoldRank,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = task.title,
+                    color = AriseTextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+                if (task.notes.isNotBlank()) {
+                    Text(
+                        text = task.notes,
+                        color = AriseTextSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("🎯 ${task.targetStat}", color = AriseCyanNeon, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("+$${task.xpReward} XP", color = AriseEmeraldHeal, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("🪙 +${task.goldReward}G", color = AriseGoldRank, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Button(
+                onClick = onComplete,
+                colors = ButtonDefaults.buttonColors(containerColor = AriseGoldRank),
+                shape = RoundedCornerShape(6.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text("DONE", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Black)
             }
         }
     }

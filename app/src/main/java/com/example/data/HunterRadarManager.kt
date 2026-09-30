@@ -100,6 +100,7 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
 
     private var lastRecordedLocation: Location? = null
     private var lastLocationTimeMs: Long = 0L
+    private var lastFixTimeMs: Long = 0L
     private var lastRawStepCounterValue = -1
     private var hasHardwareStepSensor = false
     private var lastPhysicalStepTimeMs = 0L
@@ -189,6 +190,7 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
 
     fun stopTracking() {
         lastRecordedLocation = null
+        _hasGpsFix.value = false
         _isTracking.value = false
         _isWalking.value = false
         _walkingSpeedMps.value = 0f
@@ -203,20 +205,24 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
     }
 
     override fun onLocationChanged(location: Location) {
-        // BUG-02: Reject inaccurate fixes (accuracy > 30m) entirely to prevent erratic jumps
-        if (location.hasAccuracy() && location.accuracy > 30f) return
-
         val wasGpsFix = _hasGpsFix.value
-        _hasGpsFix.value = true
         val now = System.currentTimeMillis()
 
-        // BUG-03 / R1: When transitioning to live GPS fix or first anchor, re-anchor gates to true user location
-        if (!wasGpsFix || !_hasUserAnchoredWorld) {
+        // STILL-12: Dynamic accuracy filtering (100m initial, 50m subsequent)
+        val maxAccuracy = if (!wasGpsFix) 100f else 50f
+        if (location.hasAccuracy() && location.accuracy > maxAccuracy) return
+
+        _hasGpsFix.value = true
+
+        // STILL-10: When transitioning to live fix or if fix is more than 10 mins old, re-anchor gates
+        val timeSinceFix = now - lastFixTimeMs
+        if (!wasGpsFix || !_hasUserAnchoredWorld || timeSinceFix > 10 * 60_000L) {
             _hasUserAnchoredWorld = true
             _currentLatitude.value = location.latitude
             _currentLongitude.value = location.longitude
             refreshSpawnedGates()
         }
+        lastFixTimeMs = now
 
         val prev = lastRecordedLocation
         var isWithinDisplacementWindow = true
@@ -227,15 +233,18 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
 
             when {
                 deltaMeters < 2.0f -> {
-                    // BUG-02: Below noise floor (2.0m) — standing still, prevents GPS jitter accumulation
+                    // Below noise floor (2.0m) — standing still, prevents GPS jitter accumulation
                     _walkingSpeedMps.value = 0f
                     _isWalking.value = false
                 }
                 deltaMeters in 2.0f..250.0f -> {
-                    // Real human physical movement
-                    val addedFeet = deltaMeters * FEET_PER_METER
-                    _sessionFeet.value += addedFeet
-                    _sessionMeters.value += deltaMeters
+                    // STILL-12: Only accumulate distance if fix precision is within 35m
+                    val isPreciseEnough = !location.hasAccuracy() || location.accuracy <= 35f
+                    if (isPreciseEnough) {
+                        val addedFeet = deltaMeters * FEET_PER_METER
+                        _sessionFeet.value += addedFeet
+                        _sessionMeters.value += deltaMeters
+                    }
 
                     // Speed calculation
                     val speed = if (location.hasSpeed() && location.speed > 0.1f) {
@@ -271,7 +280,7 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
             _playerBearing.value = location.bearing
         }
 
-        // R4: Gate coordinate updates behind valid displacement window to prevent teleporting
+        // Gate coordinate updates behind valid displacement window to prevent teleporting
         if (prev == null || isWithinDisplacementWindow) {
             _currentLatitude.value = location.latitude
             _currentLongitude.value = location.longitude
@@ -282,13 +291,26 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
         }
     }
 
+    override fun onProviderDisabled(provider: String) {
+        val gpsEnabled = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
+        val netEnabled = locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true
+        _isLocationServiceEnabled.value = gpsEnabled || netEnabled
+        if (!gpsEnabled) {
+            _hasGpsFix.value = false
+        }
+    }
+
+    override fun onProviderEnabled(provider: String) {
+        _isLocationServiceEnabled.value = true
+    }
+
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null || !_isTracking.value) return
 
         when (event.sensor.type) {
             Sensor.TYPE_ROTATION_VECTOR -> {
-                // R5: If moving with a reliable GPS fix, prefer GPS directional bearing over device tilt
-                if (_hasGpsFix.value && _walkingSpeedMps.value >= 0.5f) {
+                // STILL-13: Always defer to GPS directional bearing when GPS is locked
+                if (_hasGpsFix.value) {
                     return
                 }
                 // Real-time device orientation / compass heading when stationary or indoors
@@ -392,8 +414,6 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-    override fun onProviderEnabled(provider: String) {}
-    override fun onProviderDisabled(provider: String) {}
     @Deprecated("Deprecated in Java")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
 
