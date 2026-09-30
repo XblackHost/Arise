@@ -56,6 +56,7 @@ fun ExplorationScreen(
     val distanceMeters by viewModel.sessionDistanceMeters.collectAsState()
     val burnedCalories by viewModel.burnedCalories.collectAsState()
     val hasGpsFix by viewModel.hasGpsFix.collectAsState()
+    val isLocationServiceEnabled by viewModel.isLocationServiceEnabled.collectAsState()
     val currentLat by viewModel.currentLatitude.collectAsState()
     val currentLng by viewModel.currentLongitude.collectAsState()
     val spawnedGates by viewModel.spawnedGates.collectAsState()
@@ -176,6 +177,50 @@ fun ExplorationScreen(
                         Icon(Icons.Default.GpsFixed, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("AUTHORIZE LOCATION & STEP SENSORS", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        // System Location Services Disabled Alert
+        if (!isLocationServiceEnabled) {
+            item {
+                NeonCard(
+                    borderColor = Color(0xFFF59E0B),
+                    backgroundColor = Color(0xFF261905),
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        try {
+                            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                        } catch (e: Exception) {
+                            // Ignored
+                        }
+                    }
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocationOff,
+                            contentDescription = null,
+                            tint = Color(0xFFF59E0B),
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "⚠️ SYSTEM GPS DISABLED",
+                                color = Color(0xFFF59E0B),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 1.sp
+                            )
+                            Text(
+                                text = "Device location services are off. Tap here to open Android Settings and enable GPS for live gate radar.",
+                                color = AriseTextPrimary,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
                 }
             }

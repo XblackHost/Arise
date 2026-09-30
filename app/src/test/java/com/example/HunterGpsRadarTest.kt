@@ -9,6 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,6 +29,11 @@ class HunterGpsRadarTest {
         radarManager = HunterRadarManager(context)
     }
 
+    @After
+    fun tearDown() {
+        radarManager.stopTracking()
+    }
+
     @Test
     fun `test initial radar engine defaults to online maplibre`() {
         assertEquals(RadarEngine.ONLINE_MAPLIBRE, radarManager.radarEngine.value)
@@ -39,7 +45,7 @@ class HunterGpsRadarTest {
     fun `test toggle radar engine switches to offline sqlite and watermelon db`() {
         radarManager.toggleRadarEngine()
         assertEquals(RadarEngine.OFFLINE_SQLITE, radarManager.radarEngine.value)
-        assertEquals("Offline: SQLite / WatermelonDB", radarManager.radarEngine.value.displayName)
+        assertEquals("Offline: SQLite Spatial Index", radarManager.radarEngine.value.displayName)
 
         radarManager.toggleRadarEngine()
         assertEquals(RadarEngine.ONLINE_MAPLIBRE, radarManager.radarEngine.value)

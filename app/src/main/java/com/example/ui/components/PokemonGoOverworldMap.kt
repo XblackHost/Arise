@@ -1192,7 +1192,7 @@ private fun getGymTheme(gate: SpawnedGate): GymVisualTheme {
             cpRating = "CP 24,000",
             gymTypeTitle = "INFERNAL SANCTUM"
         )
-        gate.rank == "C-Rank" || bId.contains("arachna") -> GymVisualTheme(
+        gateRank.contains("c-rank") || bossRank.contains("c-rank") || bId.contains("arachna") -> GymVisualTheme(
             primaryColor = Color(0xFF059669), // Necrotic Jade
             accentColor = Color(0xFF84CC16),  // Poison Lime
             beaconColor = Color(0xFF10B981),
@@ -1201,7 +1201,7 @@ private fun getGymTheme(gate: SpawnedGate): GymVisualTheme {
             cpRating = "CP 15,000",
             gymTypeTitle = "POISON CRYPT"
         )
-        gate.rank == "D-Rank" || bId.contains("hobgoblin") -> GymVisualTheme(
+        gateRank.contains("d-rank") || bossRank.contains("d-rank") || bId.contains("hobgoblin") -> GymVisualTheme(
             primaryColor = Color(0xFFEA580C), // Iron Rust
             accentColor = Color(0xFFFDE047),  // War Bronze
             beaconColor = Color(0xFFF97316),

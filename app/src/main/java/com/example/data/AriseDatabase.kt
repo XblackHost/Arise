@@ -54,10 +54,26 @@ abstract class AriseDatabase : RoomDatabase() {
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE shadow_units ADD COLUMN originRank TEXT NOT NULL DEFAULT 'E-Rank'")
-                db.execSQL("ALTER TABLE shadow_units ADD COLUMN mpUpkeepCost INTEGER NOT NULL DEFAULT 15")
-                db.execSQL("ALTER TABLE shadow_units ADD COLUMN isDeployed INTEGER NOT NULL DEFAULT 0")
-                db.execSQL("ALTER TABLE shadow_units ADD COLUMN maxHp INTEGER NOT NULL DEFAULT 350")
+                fun addColumnIfNotExists(table: String, column: String, typeWithDef: String) {
+                    val cursor = db.query("PRAGMA table_info($table)")
+                    var exists = false
+                    val nameIdx = cursor.getColumnIndex("name")
+                    while (cursor.moveToNext()) {
+                        if (nameIdx >= 0 && cursor.getString(nameIdx) == column) {
+                            exists = true
+                            break
+                        }
+                    }
+                    cursor.close()
+                    if (!exists) {
+                        db.execSQL("ALTER TABLE $table ADD COLUMN $column $typeWithDef")
+                    }
+                }
+
+                addColumnIfNotExists("shadow_units", "originRank", "TEXT NOT NULL DEFAULT 'E-Rank'")
+                addColumnIfNotExists("shadow_units", "mpUpkeepCost", "INTEGER NOT NULL DEFAULT 15")
+                addColumnIfNotExists("shadow_units", "isDeployed", "INTEGER NOT NULL DEFAULT 0")
+                addColumnIfNotExists("shadow_units", "maxHp", "INTEGER NOT NULL DEFAULT 350")
             }
         }
 

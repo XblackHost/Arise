@@ -33,15 +33,11 @@ fun ShadowArmyScreen(
 ) {
     val shadows by viewModel.shadowArmy.collectAsState()
     val profile by viewModel.playerProfile.collectAsState()
+    val battleState by viewModel.battleState.collectAsState()
     val totalPower = shadows.sumOf { it.attackPower + it.defense }
     val deployedCount = shadows.count { it.isDeployed }
-    val synergyPercent = when {
-        profile?.selectedClass?.contains("Monarch", ignoreCase = true) == true -> 30 + (deployedCount * 5)
-        deployedCount >= 3 -> 25
-        deployedCount == 2 -> 15
-        deployedCount == 1 -> 10
-        else -> 0
-    }
+    val isMonarch = profile?.selectedClass?.contains("Monarch", ignoreCase = true) == true || profile?.rank?.contains("Monarch", ignoreCase = true) == true
+    val synergyPercent = AriseViewModel.computeSynergyPercent(isMonarch, deployedCount)
 
     LazyColumn(
         modifier = Modifier
@@ -161,8 +157,12 @@ fun ShadowArmyScreen(
             }
         } else {
             items(shadows) { unit ->
+                val activeInBattle = battleState.inBattle && battleState.activeShadows.any { it.id == unit.id }
+                val isDormantInBattle = battleState.inBattle && battleState.activeShadows.any { it.id == unit.id && !it.isAlive }
                 ShadowCard(
                     unit = unit,
+                    inBattle = activeInBattle,
+                    isDormant = isDormantInBattle,
                     onToggleDeploy = { viewModel.toggleDeployShadow(unit.id) },
                     onUpgradeWithCrystals = { viewModel.upgradeShadow(unit.id, true) },
                     onUpgradeWithGold = { viewModel.upgradeShadow(unit.id, false) }
@@ -175,13 +175,15 @@ fun ShadowArmyScreen(
 @Composable
 fun ShadowCard(
     unit: ShadowUnit,
+    inBattle: Boolean = false,
+    isDormant: Boolean = false,
     onToggleDeploy: () -> Unit,
     onUpgradeWithCrystals: () -> Unit,
     onUpgradeWithGold: () -> Unit
 ) {
     NeonCard(
-        borderColor = if (unit.isDeployed) AriseShadowViolet else Color(0xFF374151),
-        backgroundColor = if (unit.isDeployed) Color(0xFF140E26) else Color(0xFF0F111A),
+        borderColor = if (isDormant) Color(0xFFEF4444) else if (unit.isDeployed) AriseShadowViolet else Color(0xFF374151),
+        backgroundColor = if (isDormant) Color(0xFF200B0E) else if (unit.isDeployed) Color(0xFF140E26) else Color(0xFF0F111A),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -228,7 +230,35 @@ fun ShadowCard(
                     fontWeight = FontWeight.Black,
                     fontSize = 15.sp
                 )
-                if (unit.isDeployed) {
+                if (isDormant) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFF7F1D1D))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "💀 DORMANT",
+                            color = Color(0xFFFCA5A5),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                } else if (inBattle) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFF991B1B))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "⚔️ IN ACTIVE RAID",
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                } else if (unit.isDeployed) {
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
