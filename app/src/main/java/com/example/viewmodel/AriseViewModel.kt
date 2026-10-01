@@ -609,10 +609,14 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 initialLogs.add("ℹ️ No shadows deployed. Slay this boss to extract its soul with 'ARISE'!")
             }
 
-            val maxHp = p?.maxHp ?: 120
-            val maxMp = p?.maxMp ?: 60
-            val currentHp = p?.hp ?: maxHp
-            val currentMp = p?.mp ?: maxMp
+            val equippedGear = db.equipmentDao().getEquippedItemsOnce()
+            val gearHpBonus = equippedGear.sumOf { it.hpBonus }
+            val gearMpBonus = equippedGear.sumOf { it.mpBonus }
+
+            val maxHp = (p?.maxHp ?: 120) + gearHpBonus
+            val maxMp = (p?.maxMp ?: 60) + gearMpBonus
+            val currentHp = ((p?.hp ?: maxHp) + gearHpBonus).coerceAtMost(maxHp)
+            val currentMp = ((p?.mp ?: maxMp) + gearMpBonus).coerceAtMost(maxMp)
 
             _battleState.value = BattleState(
                 inBattle = true,
@@ -669,22 +673,23 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         val current = _battleState.value
         if (!current.inBattle || current.isVictory || current.isDefeat) return
 
-        val profile = playerProfile.value ?: return
-        val boss = current.currentBoss ?: return
+        viewModelScope.launch {
+            val profile = playerProfile.value ?: withContext(Dispatchers.IO) { db.playerDao().getPlayerProfileOnce() } ?: return@launch
+            val boss = current.currentBoss ?: return@launch
 
-        var damageDealt = 0
-        var mpCost = 0
-        var playerDefendingThisTurn = false
-        var potionsLeft = current.healthPotionsRemaining
-        var playerHpAfterHeal = current.playerCurrentHp
-        var playerMpAfterAction = current.playerCurrentMp
+            var damageDealt = 0
+            var mpCost = 0
+            var playerDefendingThisTurn = false
+            var potionsLeft = current.healthPotionsRemaining
+            var playerHpAfterHeal = current.playerCurrentHp
+            var playerMpAfterAction = current.playerCurrentMp
 
-        val actionLogs = mutableListOf<String>()
-        val shadowList = current.activeShadows.toMutableList()
+            val actionLogs = mutableListOf<String>()
+            val shadowList = current.activeShadows.toMutableList()
 
-        val equippedGear = equipment.value.filter { it.isEquipped }
-        val gearAtkBonus = equippedGear.sumOf { it.attackBonus }
-        val gearDefBonus = equippedGear.sumOf { it.defenseBonus }
+            val equippedGear = equipment.value.ifEmpty { withContext(Dispatchers.IO) { db.equipmentDao().getEquippedItemsOnce() } }.filter { it.isEquipped }
+            val gearAtkBonus = equippedGear.sumOf { it.attackBonus }
+            val gearDefBonus = equippedGear.sumOf { it.defenseBonus }
 
         when (actionType) {
             "HEAL" -> {
@@ -692,7 +697,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     _battleState.value = current.copy(
                         logMessages = current.logMessages + "⚠️ No Elixirs of Life remaining!"
                     )
-                    return
+                    return@launch
                 }
                 potionsLeft -= 1
                 val healAmount = 60
@@ -714,7 +719,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     _battleState.value = current.copy(
                         logMessages = current.logMessages + "⚠️ Not enough MP for Class Skill (Needs 15 MP)!"
                     )
-                    return
+                    return@launch
                 }
                 playerMpAfterAction -= mpCost
                 damageDealt = ((profile.strength * 3.4 + profile.agility * 2.2 + gearAtkBonus * 1.8) - boss.defense * 0.5).toInt().coerceAtLeast(35)
@@ -726,7 +731,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     _battleState.value = current.copy(
                         logMessages = current.logMessages + "⚠️ Not enough MP to command Shadows (Needs 25 MP)!"
                     )
-                    return
+                    return@launch
                 }
                 playerMpAfterAction -= mpCost
 
@@ -748,7 +753,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     _battleState.value = current.copy(
                         logMessages = current.logMessages + "⚠️ Not enough MP for Monarch Wrath (Needs 40 MP)!"
                     )
-                    return
+                    return@launch
                 }
                 playerMpAfterAction -= mpCost
                 damageDealt = ((profile.strength * 5.2 + profile.intelligence * 3.8 + gearAtkBonus * 2.5) - boss.defense * 0.4).toInt().coerceAtLeast(75)
@@ -798,7 +803,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 healthPotionsRemaining = potionsLeft
             )
             rewardDungeonVictory(boss)
-            return
+            return@launch
         }
 
         // Check Boss Enrage Trigger (< 35% HP)
@@ -842,16 +847,16 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             // Boss attacks Hunter directly
             var rawBossDmg = 0
             if (current.isBossChargingUltimate) {
-                rawBossDmg = (boss.attack * atkMultiplier * 2.2f - profile.endurance * 0.5f).toInt().coerceAtLeast(25)
+                rawBossDmg = ((boss.attack * atkMultiplier * 2.2f) - (profile.endurance * 0.5f) - gearDefBonus).toInt().coerceAtLeast(20)
                 actionLogs.add("🔴 CATACLYSM: ${boss.name} unleashes '${boss.bossSpecialAttackName}' directly upon Hunter!")
             } else {
                 val roll = (1..100).random()
                 if (roll <= 25 && !isEnraged) {
                     willChargeNext = true
-                    rawBossDmg = (boss.attack * atkMultiplier * 0.6f).toInt().coerceAtLeast(8)
+                    rawBossDmg = ((boss.attack * atkMultiplier * 0.6f) - (gearDefBonus * 0.5f)).toInt().coerceAtLeast(6)
                     actionLogs.add("⚠️ ALERT: ${boss.name} gathers catastrophic energy for '${boss.bossSpecialAttackName}'! [PARRY/DEFEND] next turn!")
                 } else {
-                    rawBossDmg = (boss.attack * atkMultiplier * 1.25f - profile.endurance * 0.45f).toInt().coerceAtLeast(14)
+                    rawBossDmg = ((boss.attack * atkMultiplier * 1.25f) - (profile.endurance * 0.45f) - gearDefBonus).toInt().coerceAtLeast(10)
                     actionLogs.add("${boss.name} strikes Hunter with ferocious assault for $rawBossDmg damage!")
                 }
             }
@@ -893,6 +898,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 isPlayerDefending = playerDefendingThisTurn,
                 healthPotionsRemaining = potionsLeft
             )
+        }
         }
     }
 

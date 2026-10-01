@@ -588,11 +588,10 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
             newGates.add(gate)
         }
 
+        val prevSelectedName = _selectedGate.value?.name
         _spawnedGates.value = newGates
         _sqliteCachedGateCount.value = newGates.size
-        if (_selectedGate.value == null || _spawnedGates.value.none { it.id == _selectedGate.value?.id }) {
-            _selectedGate.value = newGates.firstOrNull()
-        }
+        _selectedGate.value = newGates.find { it.name == prevSelectedName } ?: newGates.firstOrNull()
     }
 
     private fun updateDistancesToGates(userLat: Double, userLng: Double) {

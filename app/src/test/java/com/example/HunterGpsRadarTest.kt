@@ -341,4 +341,27 @@ class HunterGpsRadarTest {
         assertEquals("Iron Fang Cerberus", multiplayerManager.currentParty.value?.targetBossName)
         multiplayerManager.shutdown()
     }
+
+    @Test
+    fun `test M1 selected gate is preserved across refreshSpawnedGates`() {
+        val initialGates = radarManager.spawnedGates.value
+        assertTrue(initialGates.size >= 4)
+        val selected = initialGates[3]
+        radarManager.selectGate(selected)
+        assertEquals(selected.name, radarManager.selectedGate.value?.name)
+
+        // Refresh spawned gates
+        radarManager.refreshSpawnedGates()
+
+        // Gate selection must still match selected gate name
+        assertEquals(selected.name, radarManager.selectedGate.value?.name)
+    }
+
+    @Test
+    fun `test addWalkedFeet calculates feet steps and meters accurately`() {
+        radarManager.addWalkedFeet(250f)
+        assertEquals(250f, radarManager.sessionFeet.value, 0.01f)
+        assertEquals(100, radarManager.sessionSteps.value) // 250 / 2.5 = 100 steps
+        assertEquals(250f / HunterRadarManager.FEET_PER_METER, radarManager.sessionMeters.value, 0.1f)
+    }
 }
