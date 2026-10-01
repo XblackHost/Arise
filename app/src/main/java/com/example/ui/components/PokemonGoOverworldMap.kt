@@ -95,8 +95,8 @@ fun PokemonGoOverworldMap(
 
     LaunchedEffect(isAutoWalking) {
         while (isAutoWalking) {
-            kotlinx.coroutines.delay(350L)
-            onWalkFeet(4f)
+            kotlinx.coroutines.delay(500L)
+            onWalkFeet(2f)
         }
     }
 
@@ -1417,7 +1417,7 @@ private fun DrawScope.drawGymDungeonSpire(
         isAntiAlias = true
     }
     drawContext.canvas.nativeCanvas.drawText(
-        theme.stars,
+        "${theme.stars} • ${theme.cpRating}",
         spireTop.x,
         raidBannerY - (13f * scale),
         starsPaint

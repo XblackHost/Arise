@@ -151,7 +151,8 @@ fun QuestsScreen(
                     items(filteredQuests, key = { it.id }) { quest ->
                         InteractiveQuestCard(
                             quest = quest,
-                            onComplete = { viewModel.completeQuest(quest) }
+                            onComplete = { viewModel.completeQuest(quest) },
+                            onTimerTick = { seconds -> viewModel.updateQuestTimer(quest.id, seconds) }
                         )
                     }
                 }
@@ -183,15 +184,21 @@ fun QuestsScreen(
 @Composable
 fun InteractiveQuestCard(
     quest: Quest,
-    onComplete: () -> Unit
+    onComplete: () -> Unit,
+    onTimerTick: (Int) -> Unit = {}
 ) {
-    var timerRunning by remember { mutableStateOf(false) }
-    var secondsLeft by remember { mutableStateOf(quest.durationMinutes * 60) }
+    var timerRunning by remember(quest.id) { mutableStateOf(quest.isTimerActive) }
+    var secondsLeft by remember(quest.id) { mutableStateOf(quest.timerSecondsRemaining) }
 
-    LaunchedEffect(timerRunning) {
+    LaunchedEffect(timerRunning, quest.id) {
+        var tick = 0
         while (timerRunning && secondsLeft > 0) {
             delay(1000)
             secondsLeft -= 1
+            tick++
+            if (tick % 10 == 0) {
+                onTimerTick(secondsLeft)
+            }
         }
         if (secondsLeft == 0 && timerRunning) {
             timerRunning = false

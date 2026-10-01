@@ -191,6 +191,8 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
     fun stopTracking() {
         lastRecordedLocation = null
         _hasGpsFix.value = false
+        _hasUserAnchoredWorld = false
+        lastFixTimeMs = 0L
         _isTracking.value = false
         _isWalking.value = false
         _walkingSpeedMps.value = 0f

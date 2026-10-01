@@ -20,8 +20,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 data class ActiveBattleShadow(
@@ -137,6 +142,14 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     private val _isNyxReplying = MutableStateFlow(false)
     val isNyxReplying: StateFlow<Boolean> = _isNyxReplying.asStateFlow()
 
+    // Concurrency Mutexes to prevent race conditions
+    private val stepWriteMutex = Mutex()
+    private val questCompletionMutex = Mutex()
+    private val extractionMutex = Mutex()
+    private val equipMutex = Mutex()
+    private val statAllocationMutex = Mutex()
+    private var lastPersistedSteps = 0
+
     init {
         // STILL-16: Daily Quest Reset on New Day
         viewModelScope.launch(Dispatchers.IO) {
@@ -155,23 +168,41 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // STILL-17: Auto-complete physical walking / steps quests when distance threshold is reached
+        // C-01: Sensor-counted steps persistence with batched DB writes
         viewModelScope.launch {
-            radarManager.sessionMeters.collect { meters ->
-                if (meters >= 500f) {
-                    val activeQuests = quests.value.filter { !it.isCompleted && it.verificationType == VerificationType.STEPS }
-                    for (q in activeQuests) {
-                        val titleLower = q.title.lowercase()
-                        if (titleLower.contains("1.5 km") && meters >= 1500f) {
-                            completeQuest(q)
-                        } else if (titleLower.contains("1 km") && meters >= 1000f) {
-                            completeQuest(q)
-                        } else if (titleLower.contains("500 m") && meters >= 500f) {
-                            completeQuest(q)
+            radarManager.sessionSteps.collect { total ->
+                val delta = total - lastPersistedSteps
+                if (delta >= 10 || (total > 0 && delta >= 5)) {
+                    lastPersistedSteps = total
+                    stepWriteMutex.withLock {
+                        withContext(Dispatchers.IO) {
+                            val p = db.playerDao().getPlayerProfileOnce() ?: return@withContext
+                            db.playerDao().updateProfile(p.copy(totalSteps = p.totalSteps + delta))
                         }
                     }
                 }
             }
+        }
+
+        // C-02: Auto-complete physical walking / steps quests when distance threshold is reached
+        viewModelScope.launch {
+            combine(radarManager.sessionMeters, quests) { m, q -> m to q }
+                .distinctUntilChanged { old, new -> old.first == new.first }
+                .collect { (meters, list) ->
+                    list.filter { !it.isCompleted && it.verificationType == VerificationType.STEPS }
+                        .forEach { q ->
+                            val t = q.title.lowercase()
+                            val threshold = when {
+                                t.contains("1.5 km") -> 1500f
+                                t.contains("1 km") -> 1000f
+                                t.contains("500 m") -> 500f
+                                else -> null
+                            }
+                            if (threshold != null && meters >= threshold) {
+                                completeQuest(q)
+                            }
+                        }
+                }
         }
     }
 
@@ -179,6 +210,15 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         radarManager.stopTracking()
         multiplayerManager.shutdown()
+        val remainingSteps = radarManager.sessionSteps.value - lastPersistedSteps
+        if (remainingSteps > 0) {
+            CoroutineScope(Dispatchers.IO).launch {
+                stepWriteMutex.withLock {
+                    val p = db.playerDao().getPlayerProfileOnce() ?: return@withLock
+                    db.playerDao().updateProfile(p.copy(totalSteps = p.totalSteps + remainingSteps))
+                }
+            }
+        }
     }
 
     // ----------------------------------------------------
@@ -234,15 +274,21 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun toggleEquip(equipment: Equipment) {
-        viewModelScope.launch(Dispatchers.IO) {
-            if (equipment.isEquipped) {
-                db.equipmentDao().unequipSlot(equipment.slot)
-                _celebrationEvent.value = "UNEQUIPPED: ${equipment.name}"
-            } else {
-                db.equipmentDao().unequipSlot(equipment.slot)
-                db.equipmentDao().updateEquipment(equipment.copy(isEquipped = true))
-                _celebrationEvent.value = "EQUIPPED: ${equipment.name} (${equipment.slot.name})"
+    fun toggleEquip(equipment: Equipment) = viewModelScope.launch(Dispatchers.IO) {
+        equipMutex.withLock {
+            try {
+                db.withTransaction {
+                    if (equipment.isEquipped) {
+                        db.equipmentDao().unequipSlot(equipment.slot)
+                    } else {
+                        db.equipmentDao().unequipSlot(equipment.slot)
+                        db.equipmentDao().updateEquipment(equipment.copy(isEquipped = true))
+                    }
+                }
+                _celebrationEvent.value = if (equipment.isEquipped) "UNEQUIPPED: ${equipment.name}"
+                else "EQUIPPED: ${equipment.name} (${equipment.slot.name})"
+            } catch (e: Exception) {
+                _celebrationEvent.value = "Equipment swap failed: ${e.message}"
             }
         }
     }
@@ -251,57 +297,59 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     // PLAYER & PROGRESSION
     // ----------------------------------------------------
 
-    fun allocateStat(statName: String) {
-        val current = playerProfile.value ?: return
-        if (current.unallocatedStatPoints <= 0) return
+    fun allocateStat(statName: String) = viewModelScope.launch(Dispatchers.IO) {
+        statAllocationMutex.withLock {
+            val current = db.playerDao().getPlayerProfileOnce() ?: return@withLock
+            if (current.unallocatedStatPoints <= 0) return@withLock
 
-        val updated = when (statName.uppercase()) {
-            "STRENGTH" -> current.copy(
-                strength = current.strength + 1,
-                unallocatedStatPoints = current.unallocatedStatPoints - 1
-            )
-            "ENDURANCE" -> current.copy(
-                endurance = current.endurance + 1,
-                unallocatedStatPoints = current.unallocatedStatPoints - 1
-            )
-            "AGILITY" -> current.copy(
-                agility = current.agility + 1,
-                unallocatedStatPoints = current.unallocatedStatPoints - 1
-            )
-            "INTELLIGENCE" -> current.copy(
-                intelligence = current.intelligence + 1,
-                mp = current.mp + 5,
-                maxMp = current.maxMp + 5,
-                unallocatedStatPoints = current.unallocatedStatPoints - 1
-            )
-            "FOCUS" -> current.copy(
-                focus = current.focus + 1,
-                unallocatedStatPoints = current.unallocatedStatPoints - 1
-            )
-            "DISCIPLINE" -> current.copy(
-                discipline = current.discipline + 1,
-                unallocatedStatPoints = current.unallocatedStatPoints - 1
-            )
-            "VITALITY" -> current.copy(
-                vitality = current.vitality + 1,
-                hp = current.hp + 10,
-                maxHp = current.maxHp + 10,
-                unallocatedStatPoints = current.unallocatedStatPoints - 1
-            )
-            else -> current
-        }
+            val updated = when (statName.uppercase()) {
+                "STRENGTH" -> current.copy(
+                    strength = current.strength + 1,
+                    unallocatedStatPoints = current.unallocatedStatPoints - 1
+                )
+                "ENDURANCE" -> current.copy(
+                    endurance = current.endurance + 1,
+                    unallocatedStatPoints = current.unallocatedStatPoints - 1
+                )
+                "AGILITY" -> current.copy(
+                    agility = current.agility + 1,
+                    unallocatedStatPoints = current.unallocatedStatPoints - 1
+                )
+                "INTELLIGENCE" -> current.copy(
+                    intelligence = current.intelligence + 1,
+                    mp = current.mp + 5,
+                    maxMp = current.maxMp + 5,
+                    unallocatedStatPoints = current.unallocatedStatPoints - 1
+                )
+                "FOCUS" -> current.copy(
+                    focus = current.focus + 1,
+                    unallocatedStatPoints = current.unallocatedStatPoints - 1
+                )
+                "DISCIPLINE" -> current.copy(
+                    discipline = current.discipline + 1,
+                    unallocatedStatPoints = current.unallocatedStatPoints - 1
+                )
+                "VITALITY" -> current.copy(
+                    vitality = current.vitality + 1,
+                    hp = current.hp + 10,
+                    maxHp = current.maxHp + 10,
+                    unallocatedStatPoints = current.unallocatedStatPoints - 1
+                )
+                else -> current
+            }
 
-        viewModelScope.launch(Dispatchers.IO) {
             db.playerDao().updateProfile(updated)
         }
     }
 
-    fun completeQuest(quest: Quest) {
-        if (quest.isCompleted) return
-        viewModelScope.launch(Dispatchers.IO) {
-            val profile = db.playerDao().getPlayerProfileOnce() ?: playerProfile.value ?: return@launch
+    fun completeQuest(quest: Quest) = viewModelScope.launch(Dispatchers.IO) {
+        questCompletionMutex.withLock {
+            val fresh = db.questDao().getQuestById(quest.id) ?: return@withLock
+            if (fresh.isCompleted) return@withLock
 
-            var newXp = profile.currentXp + quest.xpReward
+            val profile = db.playerDao().getPlayerProfileOnce() ?: return@withLock
+
+            var newXp = profile.currentXp + fresh.xpReward
             var newLevel = profile.level
             var newReqXp = profile.requiredXp
             var newStatPoints = profile.unallocatedStatPoints
@@ -320,14 +368,14 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             // Stat gain from quest
-            val updated = when (quest.targetAttribute.uppercase()) {
-                "STRENGTH" -> profile.copy(strength = profile.strength + quest.attributeGain)
-                "ENDURANCE" -> profile.copy(endurance = profile.endurance + quest.attributeGain)
-                "AGILITY" -> profile.copy(agility = profile.agility + quest.attributeGain)
-                "INTELLIGENCE" -> profile.copy(intelligence = profile.intelligence + quest.attributeGain)
-                "FOCUS" -> profile.copy(focus = profile.focus + quest.attributeGain)
-                "DISCIPLINE" -> profile.copy(discipline = profile.discipline + quest.attributeGain)
-                "VITALITY" -> profile.copy(vitality = profile.vitality + quest.attributeGain)
+            val updated = when (fresh.targetAttribute.uppercase()) {
+                "STRENGTH" -> profile.copy(strength = profile.strength + fresh.attributeGain)
+                "ENDURANCE" -> profile.copy(endurance = profile.endurance + fresh.attributeGain)
+                "AGILITY" -> profile.copy(agility = profile.agility + fresh.attributeGain)
+                "INTELLIGENCE" -> profile.copy(intelligence = profile.intelligence + fresh.attributeGain)
+                "FOCUS" -> profile.copy(focus = profile.focus + fresh.attributeGain)
+                "DISCIPLINE" -> profile.copy(discipline = profile.discipline + fresh.attributeGain)
+                "VITALITY" -> profile.copy(vitality = profile.vitality + fresh.attributeGain)
                 else -> profile
             }.copy(
                 level = newLevel,
@@ -336,14 +384,15 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 hp = newHp,
                 maxHp = newMaxHp,
                 unallocatedStatPoints = newStatPoints,
-                gold = profile.gold + quest.goldReward,
+                gold = profile.gold + fresh.goldReward,
                 totalQuestsCompleted = profile.totalQuestsCompleted + 1,
-                totalWorkouts = profile.totalWorkouts + 1,
-                rank = determineRank(newLevel)
+                totalWorkouts = if (fresh.category == QuestCategory.FITNESS) profile.totalWorkouts + 1 else profile.totalWorkouts,
+                rank = determineRank(newLevel),
+                title = if (newLevel >= 25) "Shadow Monarch" else if (newLevel >= 15) "Vanguard Commander" else profile.title
             )
 
             db.withTransaction {
-                db.questDao().markQuestCompleted(quest.id)
+                db.questDao().markQuestCompleted(fresh.id)
                 db.playerDao().updateProfile(updated)
             }
 
@@ -351,6 +400,11 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 _celebrationEvent.value = "LEVEL UP! Hunter reached Level $newLevel! +3 Stat Points awarded!"
             }
         }
+    }
+
+    fun updateQuestTimer(questId: Long, secondsLeft: Int) = viewModelScope.launch(Dispatchers.IO) {
+        val q = db.questDao().getQuestById(questId) ?: return@launch
+        db.questDao().updateQuest(q.copy(timerSecondsRemaining = secondsLeft, isTimerActive = true))
     }
 
     private fun determineRank(level: Int): String {
@@ -1068,10 +1122,12 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     fun addWalkedFeet(feet: Float) {
         radarManager.addWalkedFeet(feet)
         viewModelScope.launch(Dispatchers.IO) {
-            val p = db.playerDao().getPlayerProfileOnce() ?: return@launch
-            val newSteps = p.totalSteps + (feet / 2.5f).toInt()
-            val newMeters = p.totalDistanceMeters + (feet / HunterRadarManager.FEET_PER_METER)
-            db.playerDao().updateProfile(p.copy(totalSteps = newSteps, totalDistanceMeters = newMeters))
+            stepWriteMutex.withLock {
+                val p = db.playerDao().getPlayerProfileOnce() ?: return@withLock
+                val newSteps = p.totalSteps + (feet / 2.5f).toInt()
+                val newMeters = p.totalDistanceMeters + (feet / HunterRadarManager.FEET_PER_METER)
+                db.playerDao().updateProfile(p.copy(totalSteps = newSteps, totalDistanceMeters = newMeters))
+            }
         }
     }
 

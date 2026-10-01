@@ -38,7 +38,7 @@ interface QuestDao {
     @Query("UPDATE quests SET isCompleted = 1 WHERE id = :id")
     suspend fun markQuestCompleted(id: Long)
 
-    @Query("UPDATE quests SET isCompleted = 0, timerSecondsRemaining = durationMinutes * 60 WHERE isDaily = 1")
+    @Query("UPDATE quests SET isCompleted = 0, isTimerActive = 0, timerSecondsRemaining = durationMinutes * 60 WHERE isDaily = 1")
     suspend fun resetDailyQuests()
 
     @Query("DELETE FROM quests WHERE isCompleted = 1 AND isDaily = 0")

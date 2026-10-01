@@ -429,7 +429,7 @@ private fun TaskMiniCard(task: com.example.data.model.TaskItem, onComplete: () -
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("🎯 ${task.targetStat}", color = AriseCyanNeon, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text("+$${task.xpReward} XP", color = AriseEmeraldHeal, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("+${task.xpReward} XP", color = AriseEmeraldHeal, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     Text("🪙 +${task.goldReward}G", color = AriseGoldRank, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }

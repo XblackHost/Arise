@@ -45,13 +45,13 @@ class ApiKeyStorage(private val context: Context) {
     /**
      * Stores the Gemini API key encrypted in local private storage using dynamic random IV.
      */
-    fun saveApiKey(rawKey: String) {
+    fun saveApiKey(rawKey: String): Result<Unit> {
         val trimmed = rawKey.trim()
         if (trimmed.isEmpty()) {
-            prefs.edit().remove(KEY_ENCRYPTED_API_KEY).apply()
-            return
+            prefs.edit().remove(KEY_ENCRYPTED_API_KEY).commit()
+            return Result.success(Unit)
         }
-        try {
+        return try {
             val randomIvBytes = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
             val cipher = Cipher.getInstance(CIPHER_ALGO)
             cipher.init(Cipher.ENCRYPT_MODE, getSecretKey(), IvParameterSpec(randomIvBytes))
@@ -61,13 +61,11 @@ class ApiKeyStorage(private val context: Context) {
             prefs.edit()
                 .putString(KEY_ENCRYPTED_API_KEY, encoded)
                 .putBoolean(KEY_FIRST_LAUNCH_COMPLETED, true)
-                .apply()
+                .commit()
+            Result.success(Unit)
         } catch (e: Exception) {
-            // Fallback to plain private storage if cipher fails
-            prefs.edit()
-                .putString(KEY_ENCRYPTED_API_KEY, Base64.encodeToString(trimmed.toByteArray(), Base64.NO_WRAP))
-                .putBoolean(KEY_FIRST_LAUNCH_COMPLETED, true)
-                .apply()
+            android.util.Log.e("ApiKeyStorage", "Failed to encrypt API key", e)
+            Result.failure(e)
         }
     }
 
