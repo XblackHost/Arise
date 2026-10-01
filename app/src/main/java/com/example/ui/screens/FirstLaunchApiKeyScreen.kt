@@ -58,6 +58,19 @@ fun FirstLaunchApiKeyScreen(
         context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
     }
 
+    LaunchedEffect(Unit) {
+        try {
+            clipboardManager?.primaryClip?.let { clip ->
+                if (clip.itemCount > 0) {
+                    val text = clip.getItemAt(0)?.text?.toString()?.trim() ?: ""
+                    if (text.startsWith("AIza") && text.length in 35..55) {
+                        inputKey = text
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     Scaffold(
         containerColor = AriseVoidBlack
     ) { innerPadding ->

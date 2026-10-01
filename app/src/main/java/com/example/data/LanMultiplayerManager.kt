@@ -14,6 +14,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -78,6 +80,8 @@ class LanMultiplayerManager(private val context: Context) {
 
     @Volatile
     private var activeSocket: DatagramSocket? = null
+
+    private val raidMutex = Mutex()
 
     init {
         // Pre-populate with a nearby active local guild party for quick in-person/offline play
@@ -329,7 +333,10 @@ class LanMultiplayerManager(private val context: Context) {
     }
 
     fun joinParty(discovered: DiscoveredParty, playerProfile: PlayerProfile): Boolean {
-        val boss = BossCatalog.allBosses.find { it.name.contains(discovered.targetBoss) } ?: BossCatalog.allBosses.first()
+        val boss = BossCatalog.allBosses.find {
+            it.id.equals(discovered.targetBoss, ignoreCase = true) ||
+            it.name.contains(discovered.targetBoss, ignoreCase = true)
+        } ?: BossCatalog.allBosses.first()
         val leader = PartyMember(
             id = "leader-${discovered.roomCode}",
             name = discovered.leaderName,
@@ -408,13 +415,13 @@ class LanMultiplayerManager(private val context: Context) {
         return true
     }
 
-    fun performPartyCombatTurn(
+    suspend fun performPartyCombatTurn(
         playerProfile: PlayerProfile,
         skillType: String,
         onVictory: (xpGain: Int, goldGain: Int, crystalGain: Int) -> Unit
-    ) {
-        val party = _currentParty.value ?: return
-        if (!party.isRaidActive || party.isVictory || party.isDefeat) return
+    ) = raidMutex.withLock {
+        val party = _currentParty.value ?: return@withLock
+        if (!party.isRaidActive || party.isVictory || party.isDefeat) return@withLock
 
         val playerDamage = when (skillType.uppercase()) {
             "SHADOW_STRIKE" -> (playerProfile.strength * 2.8 + playerProfile.agility * 1.5).toInt() + Random.nextInt(10, 25)
@@ -472,7 +479,7 @@ class LanMultiplayerManager(private val context: Context) {
             val gold = party.bossMaxHp
             val crystals = 10
             onVictory(xp, gold, crystals)
-            return
+            return@withLock
         }
 
         // Boss counter-attacks party

@@ -8,6 +8,7 @@ import com.example.data.model.VerificationType
 import com.example.security.ApiKeyStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -44,6 +45,13 @@ Give concise, punchy, motivating, and actionable responses. When asked for advic
         .writeTimeout(15, TimeUnit.SECONDS)
         .callTimeout(35, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .build()
+
+    private val verifyHttpClient: OkHttpClient = httpClient.newBuilder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.SECONDS)
+        .callTimeout(10, TimeUnit.SECONDS)
         .build()
 
     /**
@@ -267,49 +275,52 @@ Do not include markdown fences."""
             return@withContext Result.failure(IllegalArgumentException("Key is too short or invalid format."))
         }
 
-        for (model in CANDIDATE_MODELS) {
-            try {
-                val endpoint = "$BASE_URL/$model:generateContent?key=$trimmed"
-                val jsonBody = JSONObject().apply {
-                    put("contents", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("parts", JSONArray().apply {
-                                put(JSONObject().apply {
-                                    put("text", "Ping")
+        val outcome = withTimeoutOrNull(20_000L) {
+            for (model in CANDIDATE_MODELS) {
+                try {
+                    val endpoint = "$BASE_URL/$model:generateContent?key=$trimmed"
+                    val jsonBody = JSONObject().apply {
+                        put("contents", JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("parts", JSONArray().apply {
+                                    put(JSONObject().apply {
+                                        put("text", "Ping")
+                                    })
                                 })
                             })
                         })
-                    })
-                    put("generationConfig", JSONObject().apply {
-                        put("maxOutputTokens", 5)
-                    })
-                }
-
-                val request = Request.Builder()
-                    .url(endpoint)
-                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                val response = httpClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    return@withContext Result.success(true)
-                } else if (response.code == 400) {
-                    val errBody = response.body?.string() ?: ""
-                    val msg = if (errBody.contains("API_KEY_INVALID")) {
-                        "API key is invalid. Please check the key in Google AI Studio."
-                    } else {
-                        "API request rejected (HTTP 400)."
+                        put("generationConfig", JSONObject().apply {
+                            put("maxOutputTokens", 5)
+                        })
                     }
-                    return@withContext Result.failure(Exception(msg))
+
+                    val request = Request.Builder()
+                        .url(endpoint)
+                        .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+
+                    val response = verifyHttpClient.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        return@withTimeoutOrNull Result.success(true)
+                    } else if (response.code == 400) {
+                        val errBody = response.body?.string() ?: ""
+                        val msg = if (errBody.contains("API_KEY_INVALID")) {
+                            "API key is invalid. Please check the key in Google AI Studio."
+                        } else {
+                            "API request rejected (HTTP 400)."
+                        }
+                        return@withTimeoutOrNull Result.failure(Exception(msg))
+                    }
+                } catch (e: SocketTimeoutException) {
+                    Log.w(TAG, "Key verification timeout with $model, testing next candidate...")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Key verification error with $model: ${e.message}")
                 }
-            } catch (e: SocketTimeoutException) {
-                Log.w(TAG, "Key verification timeout with $model, testing next candidate...")
-            } catch (e: Exception) {
-                Log.w(TAG, "Key verification error with $model: ${e.message}")
             }
+            null
         }
 
-        Result.failure(Exception("Connection timed out verifying API key. Please check your internet connection."))
+        outcome ?: Result.failure(Exception("Connection timed out verifying API key. Please check your internet connection."))
     }
 
     /**

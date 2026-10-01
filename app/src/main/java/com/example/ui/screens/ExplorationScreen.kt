@@ -33,6 +33,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.RadarEngine
 import com.example.data.model.SpawnedGate
 import com.example.ui.components.NeonCard
@@ -111,6 +114,22 @@ fun ExplorationScreen(
         }
         if (!isTracking) {
             viewModel.toggleExplorationTracking()
+        }
+    }
+
+    // M10: Lifecycle ON_RESUME hook to re-register sensors/location after backgrounding
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (hasPermissions && !viewModel.isTrackingSteps.value) {
+                    viewModel.toggleExplorationTracking()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 

@@ -14,6 +14,7 @@ import com.example.data.model.*
 import com.example.security.ApiKeyStorage
 import androidx.room.withTransaction
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -149,9 +150,21 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     private val equipMutex = Mutex()
     private val statAllocationMutex = Mutex()
     private var lastPersistedSteps = 0
+    private var lastPersistedMeters = 0f
 
     init {
-        // STILL-16: Daily Quest Reset on New Day
+        // M6: Database seed verification on startup
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (db.playerDao().getPlayerProfileOnce() == null) {
+                    AriseDatabase.seedInitialDataDirect(db)
+                }
+            } catch (e: Exception) {
+                Log.w("AriseViewModel", "Database initial seed error: ${e.message}", e)
+            }
+        }
+
+        // STILL-16 & m7: Daily Quest Reset on New Day
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val prefs = getApplication<Application>().getSharedPreferences("arise_daily_tracker", Context.MODE_PRIVATE)
@@ -164,11 +177,11 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     prefs.edit().putInt("last_daily_reset_code", todayCode).apply()
                 }
             } catch (e: Exception) {
-                // Non-critical daily reset catch
+                Log.w("AriseViewModel", "Daily reset error: ${e.message}", e)
             }
         }
 
-        // C-01: Sensor-counted steps persistence with batched DB writes
+        // C-01: Sensor & physical exploration steps persistence (single source of truth)
         viewModelScope.launch {
             radarManager.sessionSteps.collect { total ->
                 val delta = total - lastPersistedSteps
@@ -184,10 +197,26 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // C-02: Auto-complete physical walking / steps quests when distance threshold is reached
+        // M-01: GPS & exploration walked meters persistence (single source of truth)
+        viewModelScope.launch {
+            radarManager.sessionMeters.collect { total ->
+                val delta = total - lastPersistedMeters
+                if (delta >= 5f) {
+                    lastPersistedMeters = total
+                    stepWriteMutex.withLock {
+                        withContext(Dispatchers.IO) {
+                            val p = db.playerDao().getPlayerProfileOnce() ?: return@withContext
+                            db.playerDao().updateProfile(p.copy(totalDistanceMeters = p.totalDistanceMeters + delta))
+                        }
+                    }
+                }
+            }
+        }
+
+        // C-02 & M-02: Auto-complete physical walking / steps quests when distance threshold is reached
         viewModelScope.launch {
             combine(radarManager.sessionMeters, quests) { m, q -> m to q }
-                .distinctUntilChanged { old, new -> old.first == new.first }
+                .distinctUntilChanged { old, new -> old.first == new.first && old.second == new.second }
                 .collect { (meters, list) ->
                     list.filter { !it.isCompleted && it.verificationType == VerificationType.STEPS }
                         .forEach { q ->
@@ -211,11 +240,14 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         radarManager.stopTracking()
         multiplayerManager.shutdown()
         val remainingSteps = radarManager.sessionSteps.value - lastPersistedSteps
-        if (remainingSteps > 0) {
+        val remainingMeters = radarManager.sessionMeters.value - lastPersistedMeters
+        if (remainingSteps > 0 || remainingMeters > 0f) {
             CoroutineScope(Dispatchers.IO).launch {
                 stepWriteMutex.withLock {
                     val p = db.playerDao().getPlayerProfileOnce() ?: return@withLock
-                    db.playerDao().updateProfile(p.copy(totalSteps = p.totalSteps + remainingSteps))
+                    val finalSteps = if (remainingSteps > 0) p.totalSteps + remainingSteps else p.totalSteps
+                    val finalMeters = if (remainingMeters > 0f) p.totalDistanceMeters + remainingMeters else p.totalDistanceMeters
+                    db.playerDao().updateProfile(p.copy(totalSteps = finalSteps, totalDistanceMeters = finalMeters))
                 }
             }
         }
@@ -299,99 +331,103 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
 
     fun allocateStat(statName: String) = viewModelScope.launch(Dispatchers.IO) {
         statAllocationMutex.withLock {
-            val current = db.playerDao().getPlayerProfileOnce() ?: return@withLock
-            if (current.unallocatedStatPoints <= 0) return@withLock
+            db.withTransaction {
+                val current = db.playerDao().getPlayerProfileOnce() ?: return@withTransaction
+                if (current.unallocatedStatPoints <= 0) return@withTransaction
 
-            val updated = when (statName.uppercase()) {
-                "STRENGTH" -> current.copy(
-                    strength = current.strength + 1,
-                    unallocatedStatPoints = current.unallocatedStatPoints - 1
-                )
-                "ENDURANCE" -> current.copy(
-                    endurance = current.endurance + 1,
-                    unallocatedStatPoints = current.unallocatedStatPoints - 1
-                )
-                "AGILITY" -> current.copy(
-                    agility = current.agility + 1,
-                    unallocatedStatPoints = current.unallocatedStatPoints - 1
-                )
-                "INTELLIGENCE" -> current.copy(
-                    intelligence = current.intelligence + 1,
-                    mp = current.mp + 5,
-                    maxMp = current.maxMp + 5,
-                    unallocatedStatPoints = current.unallocatedStatPoints - 1
-                )
-                "FOCUS" -> current.copy(
-                    focus = current.focus + 1,
-                    unallocatedStatPoints = current.unallocatedStatPoints - 1
-                )
-                "DISCIPLINE" -> current.copy(
-                    discipline = current.discipline + 1,
-                    unallocatedStatPoints = current.unallocatedStatPoints - 1
-                )
-                "VITALITY" -> current.copy(
-                    vitality = current.vitality + 1,
-                    hp = current.hp + 10,
-                    maxHp = current.maxHp + 10,
-                    unallocatedStatPoints = current.unallocatedStatPoints - 1
-                )
-                else -> current
+                val updated = when (statName.uppercase()) {
+                    "STRENGTH" -> current.copy(
+                        strength = current.strength + 1,
+                        unallocatedStatPoints = current.unallocatedStatPoints - 1
+                    )
+                    "ENDURANCE" -> current.copy(
+                        endurance = current.endurance + 1,
+                        unallocatedStatPoints = current.unallocatedStatPoints - 1
+                    )
+                    "AGILITY" -> current.copy(
+                        agility = current.agility + 1,
+                        unallocatedStatPoints = current.unallocatedStatPoints - 1
+                    )
+                    "INTELLIGENCE" -> current.copy(
+                        intelligence = current.intelligence + 1,
+                        mp = current.mp + 5,
+                        maxMp = current.maxMp + 5,
+                        unallocatedStatPoints = current.unallocatedStatPoints - 1
+                    )
+                    "FOCUS" -> current.copy(
+                        focus = current.focus + 1,
+                        unallocatedStatPoints = current.unallocatedStatPoints - 1
+                    )
+                    "DISCIPLINE" -> current.copy(
+                        discipline = current.discipline + 1,
+                        unallocatedStatPoints = current.unallocatedStatPoints - 1
+                    )
+                    "VITALITY" -> current.copy(
+                        vitality = current.vitality + 1,
+                        hp = current.hp + 10,
+                        maxHp = current.maxHp + 10,
+                        unallocatedStatPoints = current.unallocatedStatPoints - 1
+                    )
+                    else -> current
+                }
+
+                db.playerDao().updateProfile(updated)
             }
-
-            db.playerDao().updateProfile(updated)
         }
     }
 
     fun completeQuest(quest: Quest) = viewModelScope.launch(Dispatchers.IO) {
         questCompletionMutex.withLock {
-            val fresh = db.questDao().getQuestById(quest.id) ?: return@withLock
-            if (fresh.isCompleted) return@withLock
-
-            val profile = db.playerDao().getPlayerProfileOnce() ?: return@withLock
-
-            var newXp = profile.currentXp + fresh.xpReward
-            var newLevel = profile.level
-            var newReqXp = profile.requiredXp
-            var newStatPoints = profile.unallocatedStatPoints
-            var newHp = profile.hp
-            var newMaxHp = profile.maxHp
             var didLevelUp = false
-
-            while (newXp >= newReqXp) {
-                newXp -= newReqXp
-                newLevel += 1
-                newReqXp = maxOf((newReqXp * 1.35).toInt(), newReqXp + 1).coerceAtMost(Int.MAX_VALUE / 2)
-                newStatPoints += 3
-                newMaxHp += 20
-                newHp = newMaxHp
-                didLevelUp = true
-            }
-
-            // Stat gain from quest
-            val updated = when (fresh.targetAttribute.uppercase()) {
-                "STRENGTH" -> profile.copy(strength = profile.strength + fresh.attributeGain)
-                "ENDURANCE" -> profile.copy(endurance = profile.endurance + fresh.attributeGain)
-                "AGILITY" -> profile.copy(agility = profile.agility + fresh.attributeGain)
-                "INTELLIGENCE" -> profile.copy(intelligence = profile.intelligence + fresh.attributeGain)
-                "FOCUS" -> profile.copy(focus = profile.focus + fresh.attributeGain)
-                "DISCIPLINE" -> profile.copy(discipline = profile.discipline + fresh.attributeGain)
-                "VITALITY" -> profile.copy(vitality = profile.vitality + fresh.attributeGain)
-                else -> profile
-            }.copy(
-                level = newLevel,
-                currentXp = newXp,
-                requiredXp = newReqXp,
-                hp = newHp,
-                maxHp = newMaxHp,
-                unallocatedStatPoints = newStatPoints,
-                gold = profile.gold + fresh.goldReward,
-                totalQuestsCompleted = profile.totalQuestsCompleted + 1,
-                totalWorkouts = if (fresh.category == QuestCategory.FITNESS) profile.totalWorkouts + 1 else profile.totalWorkouts,
-                rank = determineRank(newLevel),
-                title = if (newLevel >= 25) "Shadow Monarch" else if (newLevel >= 15) "Vanguard Commander" else profile.title
-            )
+            var newLevel = 1
 
             db.withTransaction {
+                val fresh = db.questDao().getQuestById(quest.id) ?: return@withTransaction
+                if (fresh.isCompleted) return@withTransaction
+
+                val profile = db.playerDao().getPlayerProfileOnce() ?: return@withTransaction
+
+                var newXp = profile.currentXp + fresh.xpReward
+                newLevel = profile.level
+                var newReqXp = profile.requiredXp
+                var newStatPoints = profile.unallocatedStatPoints
+                var newHp = profile.hp
+                var newMaxHp = profile.maxHp
+
+                while (newXp >= newReqXp) {
+                    newXp -= newReqXp
+                    newLevel += 1
+                    newReqXp = maxOf((newReqXp * 1.35).toInt(), newReqXp + 1).coerceAtMost(Int.MAX_VALUE / 2)
+                    newStatPoints += 3
+                    newMaxHp += 20
+                    newHp = newMaxHp
+                    didLevelUp = true
+                }
+
+                // Stat gain from quest
+                val updated = when (fresh.targetAttribute.uppercase()) {
+                    "STRENGTH" -> profile.copy(strength = profile.strength + fresh.attributeGain)
+                    "ENDURANCE" -> profile.copy(endurance = profile.endurance + fresh.attributeGain)
+                    "AGILITY" -> profile.copy(agility = profile.agility + fresh.attributeGain)
+                    "INTELLIGENCE" -> profile.copy(intelligence = profile.intelligence + fresh.attributeGain)
+                    "FOCUS" -> profile.copy(focus = profile.focus + fresh.attributeGain)
+                    "DISCIPLINE" -> profile.copy(discipline = profile.discipline + fresh.attributeGain)
+                    "VITALITY" -> profile.copy(vitality = profile.vitality + fresh.attributeGain)
+                    else -> profile
+                }.copy(
+                    level = newLevel,
+                    currentXp = newXp,
+                    requiredXp = newReqXp,
+                    hp = newHp,
+                    maxHp = newMaxHp,
+                    unallocatedStatPoints = newStatPoints,
+                    gold = profile.gold + fresh.goldReward,
+                    totalQuestsCompleted = profile.totalQuestsCompleted + 1,
+                    totalWorkouts = if (fresh.category == QuestCategory.FITNESS) profile.totalWorkouts + 1 else profile.totalWorkouts,
+                    rank = determineRank(newLevel),
+                    title = if (newLevel >= 25) "Shadow Monarch" else if (newLevel >= 15) "Vanguard Commander" else profile.title
+                )
+
                 db.questDao().markQuestCompleted(fresh.id)
                 db.playerDao().updateProfile(updated)
             }
@@ -423,24 +459,20 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         _celebrationEvent.value = null
     }
 
-    fun setPlayerClass(newClass: String) {
-        val current = playerProfile.value ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            db.playerDao().updateProfile(current.copy(selectedClass = newClass))
-        }
+    fun setPlayerClass(newClass: String) = viewModelScope.launch(Dispatchers.IO) {
+        val current = db.playerDao().getPlayerProfileOnce() ?: return@launch
+        db.playerDao().updateProfile(current.copy(selectedClass = newClass))
     }
 
-    fun completeOnboarding(name: String, chosenClass: String) {
-        val current = playerProfile.value ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            db.playerDao().updateProfile(
-                current.copy(
-                    name = name.ifBlank { "Awakened Hunter" },
-                    selectedClass = chosenClass,
-                    isOnboardingComplete = true
-                )
+    fun completeOnboarding(name: String, chosenClass: String) = viewModelScope.launch(Dispatchers.IO) {
+        val current = db.playerDao().getPlayerProfileOnce() ?: return@launch
+        db.playerDao().updateProfile(
+            current.copy(
+                name = name.ifBlank { "Awakened Hunter" },
+                selectedClass = chosenClass,
+                isOnboardingComplete = true
             )
-        }
+        )
     }
 
     // ----------------------------------------------------
@@ -873,54 +905,69 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         if (!state.extractionEligible || state.isExtracted) return
 
         viewModelScope.launch(Dispatchers.IO) {
-            val p = db.playerDao().getPlayerProfileOnce()
-            val hunterLevel = p?.level ?: 1
-            val hunterMaxHp = p?.maxHp ?: 120
-            val hunterStr = p?.strength ?: 10
-            val hunterEnd = p?.endurance ?: 10
+            extractionMutex.withLock {
+                val fresh = _battleState.value
+                val currentBoss = fresh.currentBoss ?: return@withLock
+                if (!fresh.extractionEligible || fresh.isExtracted) return@withLock
 
-            val scaled = calculateScaledShadowStats(boss, hunterMaxHp, hunterStr, hunterEnd)
+                // Optimistically mark extracted
+                _battleState.value = fresh.copy(isExtracted = true)
 
-            val newShadow = ShadowUnit(
-                name = boss.shadowUnitName,
-                title = boss.shadowUnitTitle,
-                rank = boss.shadowRank,
-                level = hunterLevel,
-                maxHp = scaled.maxHp,
-                currentHp = scaled.maxHp,
-                attackPower = scaled.attack,
-                defense = scaled.defense,
-                speed = (20 * scaled.weight).toInt(),
-                loyalty = 100,
-                signatureSkill = boss.shadowSignatureSkill,
-                skillDescription = boss.shadowSkillDesc,
-                isSummoned = true,
-                isDeployed = true,
-                originRank = boss.rank,
-                mpUpkeepCost = scaled.mpReconstituteCost,
-                iconEmoji = boss.iconEmoji,
-                lore = "Defeated in battle. Extracted via 'ARISE'. Scaled to Hunter Rank (${p?.rank ?: "E-Rank"}) from origin ${boss.rank}. Loyally serves in the Undying Legion."
-            )
-            db.shadowDao().insertShadow(newShadow)
+                try {
+                    var unitName = currentBoss.shadowUnitName
+                    db.withTransaction {
+                        val p = db.playerDao().getPlayerProfileOnce()
+                        val hunterLevel = p?.level ?: 1
+                        val hunterMaxHp = p?.maxHp ?: 120
+                        val hunterStr = p?.strength ?: 10
+                        val hunterEnd = p?.endurance ?: 10
 
-            if (p != null) {
-                db.playerDao().updateProfile(
-                    p.copy(
-                        shadowArmyCount = p.shadowArmyCount + 1,
-                        manaCrystals = p.manaCrystals + 5
+                        val scaled = calculateScaledShadowStats(currentBoss, hunterMaxHp, hunterStr, hunterEnd)
+                        unitName = currentBoss.shadowUnitName
+
+                        val newShadow = ShadowUnit(
+                            name = currentBoss.shadowUnitName,
+                            title = currentBoss.shadowUnitTitle,
+                            rank = currentBoss.shadowRank,
+                            level = hunterLevel,
+                            maxHp = scaled.maxHp,
+                            currentHp = scaled.maxHp,
+                            attackPower = scaled.attack,
+                            defense = scaled.defense,
+                            speed = (20 * scaled.weight).toInt(),
+                            loyalty = 100,
+                            signatureSkill = currentBoss.shadowSignatureSkill,
+                            skillDescription = currentBoss.shadowSkillDesc,
+                            isSummoned = true,
+                            isDeployed = true,
+                            originRank = currentBoss.rank,
+                            mpUpkeepCost = scaled.mpReconstituteCost,
+                            iconEmoji = currentBoss.iconEmoji,
+                            lore = "Defeated in battle. Extracted via 'ARISE'. Scaled to Hunter Rank (${p?.rank ?: "E-Rank"}) from origin ${currentBoss.rank}. Loyally serves in the Undying Legion."
+                        )
+                        db.shadowDao().insertShadow(newShadow)
+
+                        if (p != null) {
+                            db.playerDao().updateProfile(
+                                p.copy(
+                                    shadowArmyCount = p.shadowArmyCount + 1,
+                                    manaCrystals = p.manaCrystals + 5
+                                )
+                            )
+                        }
+                    }
+
+                    _battleState.value = _battleState.value.copy(
+                        logMessages = _battleState.value.logMessages +
+                                "COMMAND UTTERED: 'ARISE!'" +
+                                "Shadow Extraction SUCCESSFUL! $unitName has joined your Shadow Army!"
                     )
-                )
+                    _celebrationEvent.value = "SHADOW EXTRACTION: 'ARISE!' $unitName joined your Legion!"
+                } catch (e: Exception) {
+                    _battleState.value = _battleState.value.copy(isExtracted = false)
+                    _celebrationEvent.value = "Extraction failed: ${e.message}"
+                }
             }
-
-            _battleState.value = state.copy(
-                isExtracted = true,
-                logMessages = state.logMessages +
-                        "COMMAND UTTERED: 'ARISE!'" +
-                        "Shadow Extraction SUCCESSFUL! ${boss.shadowUnitName} has joined your Shadow Army!" +
-                        "⚖️ MONARCH CAPACITY SCALING: Scaled to ${p?.rank ?: "E-Rank"} (Original: ${boss.rank})! Max HP: ${scaled.maxHp} • ATK: ${scaled.attack} • DEF: ${scaled.defense} • Reconstitution: ${scaled.mpReconstituteCost} MP."
-            )
-
-            _celebrationEvent.value = "SHADOW EXTRACTION: 'ARISE!' ${boss.shadowUnitName} joined your Legion!"
         }
     }
 
@@ -929,23 +976,25 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun toggleDeployShadow(shadowId: Long) {
         viewModelScope.launch(Dispatchers.IO) {
-            val shadow = db.shadowDao().getShadowById(shadowId) ?: return@launch
-            val currentlyDeployed = db.shadowDao().getAllShadowsOnce()
-                .filter { it.isDeployed }
-                .sortedBy { it.extractionDate } // Deterministic: oldest first
+            db.withTransaction {
+                val shadow = db.shadowDao().getShadowById(shadowId) ?: return@withTransaction
+                val currentlyDeployed = db.shadowDao().getAllShadowsOnce()
+                    .filter { it.isDeployed }
+                    .sortedBy { it.extractionDate } // Deterministic: oldest first
 
-            if (!shadow.isDeployed) {
-                if (currentlyDeployed.size >= 3) {
-                    val oldest = currentlyDeployed.first()
-                    db.shadowDao().updateShadow(oldest.copy(isDeployed = false))
-                    _celebrationEvent.value = "SQUADRON REASSIGNMENT: ${oldest.name} returned to reserves. ${shadow.name} deployed to Vanguard!"
+                if (!shadow.isDeployed) {
+                    if (currentlyDeployed.size >= 3) {
+                        val oldest = currentlyDeployed.first()
+                        db.shadowDao().updateShadow(oldest.copy(isDeployed = false))
+                        _celebrationEvent.value = "SQUADRON REASSIGNMENT: ${oldest.name} returned to reserves. ${shadow.name} deployed to Vanguard!"
+                    } else {
+                        _celebrationEvent.value = "SQUADRON DEPLOYMENT: ${shadow.name} deployed to Vanguard!"
+                    }
+                    db.shadowDao().updateShadow(shadow.copy(isDeployed = true))
                 } else {
-                    _celebrationEvent.value = "SQUADRON DEPLOYMENT: ${shadow.name} deployed to Vanguard!"
+                    db.shadowDao().updateShadow(shadow.copy(isDeployed = false))
+                    _celebrationEvent.value = "${shadow.name} recalled from active Vanguard to reserves."
                 }
-                db.shadowDao().updateShadow(shadow.copy(isDeployed = true))
-            } else {
-                db.shadowDao().updateShadow(shadow.copy(isDeployed = false))
-                _celebrationEvent.value = "${shadow.name} recalled from active Vanguard to reserves."
             }
         }
     }
@@ -1120,15 +1169,8 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addWalkedFeet(feet: Float) {
+        // C1: Single source of truth — radarManager updates sessionSteps & sessionMeters which are persisted by init collectors
         radarManager.addWalkedFeet(feet)
-        viewModelScope.launch(Dispatchers.IO) {
-            stepWriteMutex.withLock {
-                val p = db.playerDao().getPlayerProfileOnce() ?: return@withLock
-                val newSteps = p.totalSteps + (feet / 2.5f).toInt()
-                val newMeters = p.totalDistanceMeters + (feet / HunterRadarManager.FEET_PER_METER)
-                db.playerDao().updateProfile(p.copy(totalSteps = newSteps, totalDistanceMeters = newMeters))
-            }
-        }
     }
 
     fun addSimulatedDistance(meters: Float) {
@@ -1203,40 +1245,49 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         return multiplayerManager.startCoopRaid(forceSolo)
     }
 
+    // m2: Expose multiplayer listener via ViewModel
+    fun refreshLanParties() {
+        multiplayerManager.startListening()
+    }
+
     fun performCoopAttack(skillType: String) {
-        val p = playerProfile.value ?: return
-        multiplayerManager.performPartyCombatTurn(p, skillType) { xp, gold, crystals ->
-            viewModelScope.launch(Dispatchers.IO) {
-                val prof = db.playerDao().getPlayerProfileOnce() ?: return@launch
-                var newXp = prof.currentXp + xp
-                var newLevel = prof.level
-                var newReq = prof.requiredXp
-                var newStatPoints = prof.unallocatedStatPoints
-                var didLevelUp = false
+        viewModelScope.launch {
+            val p = db.playerDao().getPlayerProfileOnce() ?: playerProfile.value ?: return@launch
+            multiplayerManager.performPartyCombatTurn(p, skillType) { xp, gold, crystals ->
+                viewModelScope.launch(Dispatchers.IO) {
+                    db.withTransaction {
+                        val prof = db.playerDao().getPlayerProfileOnce() ?: return@withTransaction
+                        var newXp = prof.currentXp + xp
+                        var newLevel = prof.level
+                        var newReq = prof.requiredXp
+                        var newStatPoints = prof.unallocatedStatPoints
+                        var didLevelUp = false
 
-                while (newXp >= newReq) {
-                    newXp -= newReq
-                    newLevel += 1
-                    newReq = (newReq * 1.35).toInt().coerceAtMost(Int.MAX_VALUE / 2)
-                    newStatPoints += 3
-                    didLevelUp = true
-                }
+                        while (newXp >= newReq) {
+                            newXp -= newReq
+                            newLevel += 1
+                            newReq = (newReq * 1.35).toInt().coerceAtMost(Int.MAX_VALUE / 2)
+                            newStatPoints += 3
+                            didLevelUp = true
+                        }
 
-                db.playerDao().updateProfile(
-                    prof.copy(
-                        level = newLevel,
-                        currentXp = newXp,
-                        requiredXp = newReq,
-                        unallocatedStatPoints = newStatPoints,
-                        gold = prof.gold + gold,
-                        manaCrystals = prof.manaCrystals + crystals
-                    )
-                )
+                        db.playerDao().updateProfile(
+                            prof.copy(
+                                level = newLevel,
+                                currentXp = newXp,
+                                requiredXp = newReq,
+                                unallocatedStatPoints = newStatPoints,
+                                gold = prof.gold + gold,
+                                manaCrystals = prof.manaCrystals + crystals
+                            )
+                        )
 
-                _celebrationEvent.value = if (didLevelUp) {
-                    "CO-OP RAID CLEARED & LEVEL UP! Hunter reached Level $newLevel! (+$gold Gold, +$crystals Crystals)"
-                } else {
-                    "CO-OP RAID CLEARED! +$xp XP, +$gold Gold, +$crystals Crystals awarded to squadron!"
+                        _celebrationEvent.value = if (didLevelUp) {
+                            "CO-OP RAID CLEARED & LEVEL UP! Hunter reached Level $newLevel! (+$gold Gold, +$crystals Crystals)"
+                        } else {
+                            "CO-OP RAID CLEARED! +$xp XP, +$gold Gold, +$crystals Crystals awarded to squadron!"
+                        }
+                    }
                 }
             }
         }
@@ -1262,7 +1313,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
 
             _isNyxReplying.value = true
 
-            val profile = playerProfile.value
+            val profile = db.playerDao().getPlayerProfileOnce()
             val contextSummary = "Hunter Level: ${profile?.level ?: 1}, Class: ${profile?.selectedClass ?: "Warrior"}, Rank: ${profile?.rank ?: "E-Rank"}, STR: ${profile?.strength ?: 10}, INT: ${profile?.intelligence ?: 10}, Quests Done: ${profile?.totalQuestsCompleted ?: 0}, Shadows in Legion: ${profile?.shadowArmyCount ?: 0}"
 
             val result = geminiService.chatWithNyx(userText, contextSummary)
@@ -1283,7 +1334,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
 
     fun generateAiDailyQuest(interest: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val p = playerProfile.value
+            val p = db.playerDao().getPlayerProfileOnce()
             val res = geminiService.generateDynamicQuest(
                 preference = interest,
                 playerClass = p?.selectedClass ?: "Warrior",
@@ -1316,14 +1367,16 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
 
     fun completeTask(task: TaskItem) {
         viewModelScope.launch(Dispatchers.IO) {
-            db.taskDao().markTaskCompleted(task.id)
-            val p = playerProfile.value ?: return@launch
-            db.playerDao().updateProfile(
-                p.copy(
-                    currentXp = p.currentXp + task.xpReward,
-                    gold = p.gold + task.goldReward
+            db.withTransaction {
+                db.taskDao().markTaskCompleted(task.id)
+                val p = db.playerDao().getPlayerProfileOnce() ?: return@withTransaction
+                db.playerDao().updateProfile(
+                    p.copy(
+                        currentXp = p.currentXp + task.xpReward,
+                        gold = p.gold + task.goldReward
+                    )
                 )
-            )
+            }
         }
     }
 }

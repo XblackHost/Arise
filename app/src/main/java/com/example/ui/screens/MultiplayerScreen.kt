@@ -325,7 +325,7 @@ fun MultiplayerScreen(
                             fontSize = 12.sp,
                             letterSpacing = 1.sp
                         )
-                        IconButton(onClick = { viewModel.multiplayerManager.startListening() }) {
+                        IconButton(onClick = { viewModel.refreshLanParties() }) {
                             Icon(Icons.Default.Refresh, contentDescription = null, tint = AriseCyanNeon)
                         }
                     }

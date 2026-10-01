@@ -98,14 +98,16 @@ abstract class AriseDatabase : RoomDatabase() {
                 super.onCreate(db)
                 INSTANCE?.let { database ->
                     CoroutineScope(Dispatchers.IO).launch {
-                        populateInitialData(database)
+                        seedInitialDataDirect(database)
                     }
                 }
             }
+        }
 
-            private suspend fun populateInitialData(db: AriseDatabase) {
-                // Initial Player Profile
-                db.playerDao().insertProfile(
+        suspend fun seedInitialDataDirect(db: AriseDatabase) {
+            // Initial Player Profile
+            if (db.playerDao().getPlayerProfileOnce() != null) return
+            db.playerDao().insertProfile(
                     PlayerProfile(
                         id = 1,
                         name = "Awakened Hunter",
@@ -303,4 +305,3 @@ abstract class AriseDatabase : RoomDatabase() {
             }
         }
     }
-}

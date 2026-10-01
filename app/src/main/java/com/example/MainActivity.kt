@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -65,7 +67,12 @@ fun MainAriseApp(viewModel: AriseViewModel) {
     val profile by viewModel.playerProfile.collectAsState()
     val celebrationEvent by viewModel.celebrationEvent.collectAsState()
 
-    var currentScreen by remember { mutableStateOf(AriseScreen.DASHBOARD) }
+    var currentScreen by rememberSaveable(
+        stateSaver = Saver(
+            save = { it.name },
+            restore = { AriseScreen.valueOf(it) }
+        )
+    ) { mutableStateOf(AriseScreen.DASHBOARD) }
 
     // First Launch: Prompt for API Key and Secure it in Local Storage
     if (!hasCompletedFirstLaunch) {

@@ -250,4 +250,95 @@ class HunterGpsRadarTest {
         assertEquals("Shadow HP reduced by damage amount", 60, nonFatalResult.updatedShadow.currentHp)
         assertTrue("Shadow remains alive", nonFatalResult.updatedShadow.isAlive)
     }
+
+    @Test
+    fun `test C3 position re-anchors after large displacement jump and skips distance accumulation`() {
+        val initialLoc = Location("gps").apply {
+            latitude = 37.7800
+            longitude = -122.4100
+            accuracy = 5f
+            time = System.currentTimeMillis()
+        }
+        radarManager.onLocationChanged(initialLoc)
+        assertEquals(37.7800, radarManager.currentLatitude.value, 0.0001)
+
+        val initialMeters = radarManager.sessionMeters.value
+
+        // 5 sequential 1 km jumps
+        var currentLat = 37.7800
+        for (i in 1..5) {
+            currentLat += 0.009 // ~1000m jump
+            val jumpLoc = Location("gps").apply {
+                latitude = currentLat
+                longitude = -122.4100
+                accuracy = 5f
+                time = System.currentTimeMillis() + i * 2000L
+            }
+            radarManager.onLocationChanged(jumpLoc)
+            // Position must update every time (no permanent anchor freeze)
+            assertEquals(currentLat, radarManager.currentLatitude.value, 0.0001)
+        }
+
+        // Distance should not be accumulated for teleport jumps >250m
+        assertEquals(initialMeters, radarManager.sessionMeters.value, 0.01f)
+    }
+
+    @Test
+    fun `test M4 case-insensitive boss lookup in LAN multiplayer join`() {
+        val multiplayerManager = com.example.data.LanMultiplayerManager(context)
+        val dummyProfile = com.example.data.model.PlayerProfile(
+            name = "Sung Jin-Woo",
+            title = "Shadow Monarch",
+            rank = "S-Rank",
+            level = 20,
+            currentXp = 0,
+            requiredXp = 5000,
+            hp = 500,
+            maxHp = 500,
+            mp = 300,
+            maxMp = 300,
+            gold = 10000,
+            manaCrystals = 50,
+            unallocatedStatPoints = 0,
+            strength = 50,
+            endurance = 50,
+            agility = 50,
+            intelligence = 50,
+            focus = 50,
+            discipline = 50,
+            vitality = 50,
+            selectedClass = "Shadow Monarch"
+        )
+
+        // Case 1: lowercase
+        val lowerDiscovered = com.example.data.model.DiscoveredParty(
+            roomCode = "TEST-01",
+            partyName = "Test Squad",
+            leaderName = "Cha Hae-In",
+            leaderRank = "S-Rank",
+            targetBoss = "goblin chieftain krag", // lowercase
+            memberCount = 1,
+            maxMembers = 4,
+            ipAddress = "192.168.1.10"
+        )
+        val joined = multiplayerManager.joinParty(lowerDiscovered, dummyProfile)
+        assertTrue("Should join successfully with lowercase boss", joined)
+        assertEquals("Goblin Chieftain Krag", multiplayerManager.currentParty.value?.targetBossName)
+
+        // Case 2: uppercase
+        val upperDiscovered = com.example.data.model.DiscoveredParty(
+            roomCode = "TEST-02",
+            partyName = "Cerberus Squad",
+            leaderName = "Baek Yoonho",
+            leaderRank = "A-Rank",
+            targetBoss = "IRON FANG CERBERUS", // uppercase
+            memberCount = 1,
+            maxMembers = 4,
+            ipAddress = "192.168.1.11"
+        )
+        val joinedUpper = multiplayerManager.joinParty(upperDiscovered, dummyProfile)
+        assertTrue("Should join successfully with uppercase boss", joinedUpper)
+        assertEquals("Iron Fang Cerberus", multiplayerManager.currentParty.value?.targetBossName)
+        multiplayerManager.shutdown()
+    }
 }

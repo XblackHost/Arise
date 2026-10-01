@@ -104,7 +104,7 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
     private var lastRawStepCounterValue = -1
     private var hasHardwareStepSensor = false
     private var lastPhysicalStepTimeMs = 0L
-    private var _hasUserAnchoredWorld = false
+    private var hasUserAnchoredWorld = false
 
     // Accelerometer-based Automatic Step Detection Filter
     private var filteredGravity = 9.81f
@@ -120,6 +120,11 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
 
     @SuppressLint("MissingPermission")
     fun startTracking() {
+        try {
+            locationManager?.removeUpdates(this)
+            sensorManager?.unregisterListener(this)
+        } catch (_: Exception) {}
+
         lastRecordedLocation = null
         _isTracking.value = true
 
@@ -191,7 +196,7 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
     fun stopTracking() {
         lastRecordedLocation = null
         _hasGpsFix.value = false
-        _hasUserAnchoredWorld = false
+        hasUserAnchoredWorld = false
         lastFixTimeMs = 0L
         _isTracking.value = false
         _isWalking.value = false
@@ -218,8 +223,8 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
 
         // STILL-10: When transitioning to live fix or if fix is more than 10 mins old, re-anchor gates
         val timeSinceFix = now - lastFixTimeMs
-        if (!wasGpsFix || !_hasUserAnchoredWorld || timeSinceFix > 10 * 60_000L) {
-            _hasUserAnchoredWorld = true
+        if (!wasGpsFix || !hasUserAnchoredWorld || timeSinceFix > 10 * 60_000L) {
+            hasUserAnchoredWorld = true
             _currentLatitude.value = location.latitude
             _currentLongitude.value = location.longitude
             refreshSpawnedGates()
@@ -227,7 +232,6 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
         lastFixTimeMs = now
 
         val prev = lastRecordedLocation
-        var isWithinDisplacementWindow = true
 
         if (prev != null && _isTracking.value) {
             val deltaMeters = calculateDistanceMeters(prev.latitude, prev.longitude, location.latitude, location.longitude)
@@ -274,23 +278,21 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
                     }
                 }
                 else -> {
-                    // R4: Teleport / Glitch jump (> 250m) — ignore displacement
-                    isWithinDisplacementWindow = false
+                    // C3: Teleport / Glitch jump (> 250m) — re-anchor position, do not accumulate walked distance/steps
+                    _walkingSpeedMps.value = 0f
+                    _isWalking.value = false
                 }
             }
         } else if (location.hasBearing()) {
             _playerBearing.value = location.bearing
         }
 
-        // Gate coordinate updates behind valid displacement window to prevent teleporting
-        if (prev == null || isWithinDisplacementWindow) {
-            _currentLatitude.value = location.latitude
-            _currentLongitude.value = location.longitude
-            lastRecordedLocation = location
-            lastLocationTimeMs = now
-            // Recalculate gate distances relative to player's new position
-            updateDistancesToGates(location.latitude, location.longitude)
-        }
+        // C3: Always re-anchor player coordinates and recalculate gate distances so position never freezes after a jump
+        _currentLatitude.value = location.latitude
+        _currentLongitude.value = location.longitude
+        lastRecordedLocation = location
+        lastLocationTimeMs = now
+        updateDistancesToGates(location.latitude, location.longitude)
     }
 
     override fun onProviderDisabled(provider: String) {
@@ -338,7 +340,10 @@ class HunterRadarManager(private val context: Context) : LocationListener, Senso
                     lastRawStepCounterValue = totalSteps
                 } else {
                     val delta = totalSteps - lastRawStepCounterValue
-                    if (delta in 1..100) {
+                    if (delta < 0) {
+                        // M3: Sensor reset (device reboot etc.) — re-anchor to new boot counter
+                        lastRawStepCounterValue = totalSteps
+                    } else if (delta in 1..100) {
                         lastRawStepCounterValue = totalSteps
                         onPhysicalStepDetected(delta)
                     } else if (delta > 100) {
