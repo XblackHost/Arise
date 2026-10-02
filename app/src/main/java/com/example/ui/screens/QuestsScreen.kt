@@ -151,6 +151,7 @@ fun QuestsScreen(
                     items(filteredQuests, key = { it.id }) { quest ->
                         InteractiveQuestCard(
                             quest = quest,
+                            viewModel = viewModel,
                             onComplete = { viewModel.completeQuest(quest) },
                             onTimerTick = { seconds -> viewModel.updateQuestTimer(quest.id, seconds) }
                         )
@@ -184,6 +185,7 @@ fun QuestsScreen(
 @Composable
 fun InteractiveQuestCard(
     quest: Quest,
+    viewModel: AriseViewModel? = null,
     onComplete: () -> Unit,
     onTimerTick: (Int) -> Unit = {}
 ) {
@@ -326,6 +328,19 @@ fun InteractiveQuestCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(if (timerRunning) "PAUSE ($timeStr)" else "START TIMER ($timeStr)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    if (viewModel?.hasConsumable("cons_timerskip") == true) {
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.consumeOne("cons_timerskip")
+                                onComplete()
+                            },
+                            modifier = Modifier.weight(1f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, AriseGoldRank)
+                        ) {
+                            Text("⏭️ SKIP (1 CONSUMABLE)", fontSize = 10.sp, color = AriseGoldRank)
+                        }
                     }
                 }
 

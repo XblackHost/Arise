@@ -687,6 +687,34 @@ fun ActiveBossCombatView(
                         Text("💥 Monarch (40 MP)", color = AriseGoldRank, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+
+                if (viewModel.hasConsumable("cons_elixir")) {
+                    Button(
+                        onClick = {
+                            viewModel.executePlayerAttack("HEAL")
+                            viewModel.consumeOne("cons_elixir")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF14532D)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("🧪 USE SHOP ELIXIR (+60 HP)", color = Color(0xFF86EFAC), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                if (viewModel.hasConsumable("cons_tonic")) {
+                    Button(
+                        onClick = {
+                            viewModel.executePlayerAttack("TONIC")
+                            viewModel.consumeOne("cons_tonic")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A8A)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("🧪 USE MANA TONIC (+30 MP)", color = Color(0xFF93C5FD), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
     }

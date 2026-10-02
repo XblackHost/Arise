@@ -21,6 +21,9 @@ interface EquipmentDao {
     @Query("SELECT * FROM equipment_items WHERE isEquipped = 1")
     suspend fun getEquippedItemsOnce(): List<Equipment>
 
+    @Query("SELECT * FROM equipment_items")
+    suspend fun getAllEquipmentOnce(): List<Equipment>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEquipment(item: Equipment): Long
 

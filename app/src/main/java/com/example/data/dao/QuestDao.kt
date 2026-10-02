@@ -23,6 +23,9 @@ interface QuestDao {
     @Query("SELECT * FROM quests WHERE id = :id LIMIT 1")
     suspend fun getQuestById(id: Long): Quest?
 
+    @Query("SELECT * FROM quests")
+    suspend fun getAllQuestsOnce(): List<Quest>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertQuest(quest: Quest): Long
 

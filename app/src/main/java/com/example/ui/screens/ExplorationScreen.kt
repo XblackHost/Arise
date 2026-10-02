@@ -433,6 +433,36 @@ fun ExplorationScreen(
                     }
                 }
 
+                if (viewModel.hasConsumable("cons_beacon") && selectedGate != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = {
+                            selectedGate?.let { g ->
+                                viewModel.teleportToGate(g)
+                                viewModel.consumeOne("cons_beacon")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AriseCyanNeon)
+                    ) {
+                        Text("📡 TELEPORT TO SELECTED GATE (1 BEACON)", fontSize = 11.sp, color = AriseCyanNeon)
+                    }
+                }
+
+                if (viewModel.hasConsumable("cons_reroll")) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.respawnNearbyGates()
+                            viewModel.consumeOne("cons_reroll")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AriseGoldRank)
+                    ) {
+                        Text("🎲 REROLL GATES (1 CONSUMABLE)", fontSize = 11.sp, color = AriseGoldRank)
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Walk Distance Drills (Convenient increment buttons for testing or indoor drills)

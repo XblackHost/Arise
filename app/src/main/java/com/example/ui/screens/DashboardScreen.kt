@@ -33,6 +33,7 @@ import com.example.data.model.Quest
 import com.example.ui.components.NeonCard
 import com.example.ui.components.RankBadge
 import com.example.ui.components.StatProgressBar
+import com.example.ui.components.VowCard
 import com.example.ui.theme.*
 import com.example.viewmodel.AriseViewModel
 
@@ -325,6 +326,11 @@ fun DashboardScreen(
                     }
                 }
             }
+        }
+
+        // Vow of Discipline 48-hour covenant
+        item {
+            VowCard(viewModel = viewModel)
         }
 
         // Active Daily Quests Section Header

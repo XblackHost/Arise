@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.Saver
@@ -29,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.CelebrationModal
+import com.example.ui.components.MilestoneOfferModal
 import com.example.ui.screens.*
 import com.example.ui.theme.*
 import com.example.viewmodel.AriseViewModel
@@ -44,6 +46,7 @@ enum class AriseScreen(val label: String) {
     EXPLORATION("Explore"),
     MULTIPLAYER("Squadron"),
     INVENTORY("Inventory"),
+    SHOP("Blacksmith"),
     SETTINGS("Settings")
 }
 
@@ -142,6 +145,13 @@ fun MainAriseApp(viewModel: AriseViewModel) {
                             imageVector = Icons.Default.Group,
                             contentDescription = "Squadron Co-Op",
                             tint = if (currentScreen == AriseScreen.MULTIPLAYER) AriseCyanNeon else AriseTextSecondary
+                        )
+                    }
+                    IconButton(onClick = { currentScreen = AriseScreen.SHOP }) {
+                        Icon(
+                            imageVector = Icons.Default.Storefront,
+                            contentDescription = "Blacksmith",
+                            tint = if (currentScreen == AriseScreen.SHOP) AriseGoldRank else AriseTextSecondary
                         )
                     }
                     IconButton(onClick = { currentScreen = AriseScreen.SETTINGS }) {
@@ -294,10 +304,13 @@ fun MainAriseApp(viewModel: AriseViewModel) {
                     viewModel = viewModel,
                     onNavigateBack = { currentScreen = AriseScreen.DASHBOARD }
                 )
+                AriseScreen.SHOP -> ShopScreen(viewModel = viewModel)
                 AriseScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
             }
         }
     }
+
+    MilestoneOfferModal(viewModel = viewModel)
 
     CelebrationModal(
         message = celebrationEvent,

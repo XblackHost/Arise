@@ -149,6 +149,21 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     private val extractionMutex = Mutex()
     private val equipMutex = Mutex()
     private val statAllocationMutex = Mutex()
+    private val vowMutex = Mutex()
+    private val shopMutex = Mutex()
+    private val milestoneMutex = Mutex()
+
+    val vowState: StateFlow<VowState?> = db.vowDao().getVowState()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val consumables: StateFlow<List<Consumable>> = db.consumableDao()
+        .getAllConsumables()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activeOffers: StateFlow<List<PendingOffer>> = db.pendingOfferDao()
+        .getActiveOffers()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private var lastPersistedSteps = 0
     private var lastPersistedMeters = 0f
 
@@ -161,6 +176,21 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 Log.w("AriseViewModel", "Database initial seed error: ${e.message}", e)
+            }
+        }
+
+        // Vow of Discipline midnight check
+        viewModelScope.launch(Dispatchers.IO) {
+            vowMutex.withLock { processMidnightVowCheck() }
+        }
+
+        // Milestone purge expired & check pending offers
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                db.pendingOfferDao().purgeExpired()
+                milestoneMutex.withLock { checkMilestones() }
+            } catch (e: Exception) {
+                Log.w("AriseViewModel", "Milestone check error: ${e.message}", e)
             }
         }
 
@@ -262,7 +292,12 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             _keyValidationStatus.value = "Encrypting and verifying key with Google Gemini..."
             val verifyResult = geminiService.verifyKey(rawKey)
             if (verifyResult.isSuccess) {
-                apiKeyStorage.saveApiKey(rawKey)
+                val saveResult = apiKeyStorage.saveApiKey(rawKey)
+                if (saveResult.isFailure) {
+                    _keyValidationStatus.value = "Encryption failed: ${saveResult.exceptionOrNull()?.message}"
+                    onDone(false)
+                    return@launch
+                }
                 _maskedApiKey.value = apiKeyStorage.getMaskedApiKey()
                 _hasValidApiKey.value = true
                 _hasCompletedFirstLaunch.value = true
@@ -274,7 +309,12 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                         errMsg.contains("ConnectException", ignoreCase = true) ||
                         errMsg.contains("timeout", ignoreCase = true)
                 if (isNetworkError) {
-                    apiKeyStorage.saveApiKey(rawKey)
+                    val saveResult = apiKeyStorage.saveApiKey(rawKey)
+                    if (saveResult.isFailure) {
+                        _keyValidationStatus.value = "Encryption failed: ${saveResult.exceptionOrNull()?.message}"
+                        onDone(false)
+                        return@launch
+                    }
                     _maskedApiKey.value = apiKeyStorage.getMaskedApiKey()
                     _hasValidApiKey.value = true
                     _hasCompletedFirstLaunch.value = true
@@ -380,6 +420,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         questCompletionMutex.withLock {
             var didLevelUp = false
             var newLevel = 1
+            var hadVigor = false
 
             db.withTransaction {
                 val fresh = db.questDao().getQuestById(quest.id) ?: return@withTransaction
@@ -387,7 +428,11 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
 
                 val profile = db.playerDao().getPlayerProfileOnce() ?: return@withTransaction
 
-                var newXp = profile.currentXp + fresh.xpReward
+                hadVigor = db.consumableDao().getOne("cons_questboost")?.count?.let { it > 0 } == true
+                val xpMultiplier = if (hadVigor) 1.5f else 1.0f
+                val awardedXp = (fresh.xpReward * xpMultiplier).toInt()
+
+                var newXp = profile.currentXp + awardedXp
                 newLevel = profile.level
                 var newReqXp = profile.requiredXp
                 var newStatPoints = profile.unallocatedStatPoints
@@ -432,8 +477,13 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 db.playerDao().updateProfile(updated)
             }
 
+            if (hadVigor) {
+                db.consumableDao().decrement("cons_questboost")
+            }
+
             if (didLevelUp) {
                 _celebrationEvent.value = "LEVEL UP! Hunter reached Level $newLevel! +3 Stat Points awarded!"
+                checkMilestonesAfterLevelUp()
             }
         }
     }
@@ -578,7 +628,6 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             val deployedShadows = allShadows
                 .filter { it.isDeployed }
                 .take(3)
-                .ifEmpty { allShadows.take(3) }
 
             val activeShadowsList = deployedShadows.map { shadow ->
                 ActiveBattleShadow(
@@ -709,6 +758,10 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 playerMpAfterAction = (playerMpAfterAction + 15).coerceAtMost(profile.maxMp)
                 actionLogs.add("🛡️ Hunter assumes Steel Parry Stance! +15 MP restored. Incoming damage reduced by 70%!")
             }
+            "TONIC" -> {
+                playerMpAfterAction = (playerMpAfterAction + 30).coerceAtMost(profile.maxMp)
+                actionLogs.add("🧪 Hunter drinks Mana Tonic! +30 MP restored!")
+            }
             "BASIC" -> {
                 damageDealt = ((profile.strength * 2.4 + profile.agility * 1.0 + gearAtkBonus * 1.2) - boss.defense * 0.4).toInt().coerceAtLeast(18)
                 actionLogs.add("Hunter strikes with Physical Precision for $damageDealt damage!${if (gearAtkBonus > 0) " (+${gearAtkBonus} Gear ATK)" else ""}")
@@ -835,11 +888,18 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             shadowList[targetShadowIndex] = reconResult.updatedShadow
             playerMpAfterAction -= reconResult.consumedMp
 
+            val useReviveCharm = hasConsumable("cons_revive")
             if (reconResult.didReconstitute) {
                 actionLogs.add("💥 ${boss.name} delivered a fatal strike of $bossDmgToShadow damage to [${target.name}]!")
                 actionLogs.add("🌑 PASSIVE RECONSTITUTION: [${target.name}] consumed ${reconResult.consumedMp} MP from Hunter and immediately regenerated from the dark mist with full HP! 'ARISE!'")
             } else if (!reconResult.updatedShadow.isAlive) {
-                actionLogs.add("💀 [${target.name}] was destroyed by $bossDmgToShadow damage! Hunter lacked ${target.mpReconstituteCost} MP to passively reconstitute it! Shadow is now dormant.")
+                if (useReviveCharm) {
+                    shadowList[targetShadowIndex] = target.copy(currentHp = target.maxHp, isAlive = true)
+                    viewModelScope.launch { consumeOne("cons_revive") }
+                    actionLogs.add("💎 REVIVE CHARM: [${target.name}] shatters the charm and rises fully restored!")
+                } else {
+                    actionLogs.add("💀 [${target.name}] was destroyed by $bossDmgToShadow damage! Hunter lacked ${target.mpReconstituteCost} MP to passively reconstitute it! Shadow is now dormant.")
+                }
             } else {
                 actionLogs.add("🛡️ [${target.name}] tanks ${boss.name}'s blow, taking $bossDmgToShadow damage! (${reconResult.updatedShadow.currentHp}/${target.maxHp} HP remaining)")
             }
@@ -969,6 +1029,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                                 "Shadow Extraction SUCCESSFUL! $unitName has joined your Shadow Army!"
                     )
                     _celebrationEvent.value = "SHADOW EXTRACTION: 'ARISE!' $unitName joined your Legion!"
+                    flagMilestone("first_arise")
                 } catch (e: Exception) {
                     _battleState.value = _battleState.value.copy(isExtracted = false)
                     _celebrationEvent.value = "Extraction failed: ${e.message}"
@@ -1136,6 +1197,8 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             if (didLevelUp) {
                 _celebrationEvent.value = "DUNGEON CLEARED & LEVEL UP! Hunter reached Level $newLevel!"
             }
+            flagMilestone("first_boss")
+            checkMilestonesAfterLevelUp()
         }
     }
 
@@ -1384,5 +1447,338 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
         }
+    }
+
+    // ----------------------------------------------------
+    // VOW OF DISCIPLINE (48H COVENANT)
+    // ----------------------------------------------------
+
+    private suspend fun processMidnightVowCheck() = db.withTransaction {
+        val vow = db.vowDao().getVowStateOnce() ?: return@withTransaction
+        if (!vow.isActive) return@withTransaction
+
+        val now = System.currentTimeMillis()
+        if (vow.lastResetAt > now) {
+            db.vowDao().upsert(vow.copy(lastResetAt = now))
+            return@withTransaction
+        }
+
+        val today = VowState.dateCode()
+        if (today == vow.lastRewardDate) return@withTransaction
+
+        if (vow.isTimerExpired(now)) {
+            db.vowDao().upsert(vow.copy(currentStreak = 0, lastRewardDate = today))
+            _celebrationEvent.value = "Vow timer lapsed. Streak reset to 0. Reset anytime to rebuild."
+            return@withTransaction
+        }
+
+        val p = db.playerDao().getPlayerProfileOnce() ?: return@withTransaction
+        val newStreak = vow.currentStreak + 1
+
+        val multiplier = (1.0f + (newStreak - 1) * 0.05f).coerceAtMost(3.0f)
+        val xpGain = (30 * multiplier).toInt()
+        val goldGain = (20 * multiplier).toInt()
+        val milestoneBonus = when (newStreak) {
+            3 -> 50; 7 -> 150; 14 -> 300; 30 -> 750; 60 -> 1500; 100 -> 3000; else -> 0
+        }
+        val crystalGain = when (newStreak) {
+            7 -> 2; 30 -> 5; 100 -> 15; else -> 0
+        }
+
+        var newXp = p.currentXp + xpGain + milestoneBonus
+        var newLevel = p.level
+        var newReq = p.requiredXp
+        var newPts = p.unallocatedStatPoints
+        var didLevel = false
+        while (newXp >= newReq) {
+            newXp -= newReq
+            newLevel++
+            newReq = (newReq * 1.35).toInt().coerceAtMost(Int.MAX_VALUE / 2)
+            newPts += 3
+            didLevel = true
+        }
+
+        db.playerDao().updateProfile(
+            p.copy(
+                level = newLevel,
+                currentXp = newXp,
+                requiredXp = newReq,
+                unallocatedStatPoints = newPts,
+                gold = p.gold + goldGain,
+                manaCrystals = p.manaCrystals + crystalGain,
+                discipline = p.discipline + 1,
+                rank = determineRank(newLevel)
+            )
+        )
+        db.vowDao().upsert(
+            vow.copy(
+                currentStreak = newStreak,
+                longestStreak = maxOf(vow.longestStreak, newStreak),
+                totalRewards = vow.totalRewards + 1,
+                lastRewardDate = today,
+                totalXpEarned = vow.totalXpEarned + xpGain + milestoneBonus
+            )
+        )
+
+        _celebrationEvent.value = buildString {
+            append("VOW HELD • Day $newStreak • +$xpGain XP, +$goldGain 🪙, +1 Discipline")
+            if (milestoneBonus > 0) append("\n🏆 Milestone! +$milestoneBonus bonus XP")
+            if (crystalGain > 0) append(" • +$crystalGain 💎")
+            if (didLevel) append("\n⚡ LEVEL UP → $newLevel!")
+        }
+    }
+
+    fun takeVow() = viewModelScope.launch(Dispatchers.IO) {
+        vowMutex.withLock {
+            val now = System.currentTimeMillis()
+            val existing = db.vowDao().getVowStateOnce() ?: VowState()
+            db.vowDao().upsert(
+                existing.copy(
+                    isActive = true,
+                    vowStartedAt = if (existing.vowStartedAt == 0L) now else existing.vowStartedAt,
+                    lastResetAt = now,
+                    lastRewardDate = 0
+                )
+            )
+            _celebrationEvent.value = "VOW OF DISCIPLINE ACTIVE. Reset every 48h to hold the streak."
+        }
+    }
+
+    fun resetVowTimer() = viewModelScope.launch(Dispatchers.IO) {
+        vowMutex.withLock {
+            val vow = db.vowDao().getVowStateOnce() ?: return@withLock
+            if (!vow.isActive) return@withLock
+            db.vowDao().upsert(vow.copy(lastResetAt = System.currentTimeMillis()))
+            _celebrationEvent.value = "Vow timer reset. 48h window renewed."
+        }
+    }
+
+    fun abandonVow() = viewModelScope.launch(Dispatchers.IO) {
+        vowMutex.withLock {
+            val vow = db.vowDao().getVowStateOnce() ?: return@withLock
+            db.vowDao().upsert(vow.copy(isActive = false, currentStreak = 0, lastRewardDate = 0))
+            _celebrationEvent.value = "Vow released. No penalty."
+        }
+    }
+
+    // ----------------------------------------------------
+    // SHOP & BLACKSMITH SYSTEM
+    // ----------------------------------------------------
+
+    fun vowDiscountPercent(streak: Int): Int = when {
+        streak >= 100 -> 15
+        streak >= 30 -> 10
+        streak >= 7 -> 5
+        else -> 0
+    }
+
+    fun purchaseShopItem(item: com.example.data.ShopItem) = viewModelScope.launch(Dispatchers.IO) {
+        shopMutex.withLock {
+            try {
+                db.withTransaction {
+                    val p = db.playerDao().getPlayerProfileOnce() ?: return@withTransaction
+
+                    if (item.className != null &&
+                        !p.selectedClass.equals(item.className, ignoreCase = true)) {
+                        _celebrationEvent.value = "Exclusive to ${item.className}."
+                        return@withTransaction
+                    }
+                    if (p.level < item.requiredLevel) {
+                        _celebrationEvent.value = "Requires Level ${item.requiredLevel}."
+                        return@withTransaction
+                    }
+
+                    if (item.isCosmetic) {
+                        if (db.purchaseLogDao().isPurchased(item.id)) {
+                            _celebrationEvent.value = "Already owned."
+                            return@withTransaction
+                        }
+                    } else if (!item.isConsumable) {
+                        val owned = db.equipmentDao().getAllEquipmentOnce()
+                        if (owned.any { it.name == item.equipment.name }) {
+                            _celebrationEvent.value = "Already owned."
+                            return@withTransaction
+                        }
+                    }
+
+                    val vow = db.vowDao().getVowStateOnce()
+                    val discount = vowDiscountPercent(vow?.longestStreak ?: 0)
+                    val finalGold = item.goldPrice * (100 - discount) / 100
+
+                    if (p.gold < finalGold || p.manaCrystals < item.crystalPrice) {
+                        _celebrationEvent.value = "Insufficient currency."
+                        return@withTransaction
+                    }
+
+                    db.playerDao().updateProfile(
+                        p.copy(
+                            gold = p.gold - finalGold,
+                            manaCrystals = p.manaCrystals - item.crystalPrice
+                        )
+                    )
+
+                    when {
+                        item.isConsumable && item.consumableId != null -> {
+                            val existing = db.consumableDao().getOne(item.consumableId)
+                            db.consumableDao().upsert(
+                                Consumable(item.consumableId, (existing?.count ?: 0) + 1)
+                            )
+                        }
+                        item.isCosmetic -> db.purchaseLogDao().log(PurchaseLog(item.id))
+                        else -> {
+                            db.equipmentDao().insertEquipment(item.equipment.copy(id = 0))
+                            db.purchaseLogDao().log(PurchaseLog(item.id))
+                        }
+                    }
+                }
+                _celebrationEvent.value = "PURCHASED: ${item.equipment.name}"
+            } catch (e: Exception) {
+                _celebrationEvent.value = "Purchase failed: ${e.message}"
+            }
+        }
+    }
+
+    fun consumeOne(consumableId: String, onConsumed: (() -> Unit)? = null) = viewModelScope.launch(Dispatchers.IO) {
+        val success = db.consumableDao().decrement(consumableId) > 0
+        if (success && onConsumed != null) {
+            withContext(Dispatchers.Main) {
+                onConsumed()
+            }
+        }
+    }
+
+    suspend fun consumeOneSuspend(consumableId: String): Boolean =
+        withContext(Dispatchers.IO) { db.consumableDao().decrement(consumableId) > 0 }
+
+    fun hasConsumable(consumableId: String): Boolean =
+        consumables.value.find { it.itemId == consumableId }?.count?.let { it > 0 } ?: false
+
+    // Vow-streak based shop discount that equipped gear can boost
+    fun permanentShopDiscount(): Int {
+        val gear = equipment.value.filter { it.isEquipped }
+        val bandBonus = if (gear.any { it.name == "Unbroken Band" }) 5 else 0
+        val crownBonus = if (gear.any { it.name == "Sovereign's Crown" }) 10 else 0
+        return bandBonus + crownBonus
+    }
+
+    fun teleportToGate(gate: SpawnedGate) = viewModelScope.launch(Dispatchers.IO) {
+        radarManager.selectGate(gate)
+        radarManager.advanceTowardsGate(gate, gate.distanceFeet)
+    }
+
+    // ----------------------------------------------------
+    // MILESTONE OFFERS & TRANSCENDENCE
+    // ----------------------------------------------------
+
+    private suspend fun checkMilestones() = db.withTransaction {
+        if (_battleState.value.inBattle) return@withTransaction
+
+        val p = db.playerDao().getPlayerProfileOnce() ?: return@withTransaction
+        val vow = db.vowDao().getVowStateOnce()
+
+        val candidates = buildList {
+            listOf(5, 10, 25, 50, 100).forEach { if (p.level >= it) add("level_$it") }
+            val longest = vow?.longestStreak ?: 0
+            listOf(10, 30, 60, 100).forEach { if (longest >= it) add("streak_$it") }
+            if (p.totalQuestsCompleted >= 50) add("quests_50")
+            if (p.shadowArmyCount >= 5) add("shadows_5")
+        }
+
+        for (key in candidates) {
+            if (db.milestoneDao().hasFired(key)) continue
+            val tpl = com.example.data.MilestoneOffers.byKey[key] ?: continue
+            val now = System.currentTimeMillis()
+            db.milestoneDao().log(MilestoneLog(key, now))
+            db.pendingOfferDao().insert(
+                PendingOffer(
+                    milestoneKey = key,
+                    title = tpl.title, description = tpl.description,
+                    goldCost = tpl.goldCost, crystalCost = tpl.crystalCost,
+                    rewardType = tpl.rewardType, rewardPayload = tpl.payload,
+                    generatedAt = now, expiresAt = now + PendingOffer.WINDOW_MS
+                )
+            )
+        }
+    }
+
+    fun flagMilestone(key: String) = viewModelScope.launch(Dispatchers.IO) {
+        milestoneMutex.withLock {
+            if (db.milestoneDao().hasFired(key)) return@withLock
+            val tpl = com.example.data.MilestoneOffers.byKey[key] ?: return@withLock
+            val now = System.currentTimeMillis()
+            db.withTransaction {
+                db.milestoneDao().log(MilestoneLog(key, now))
+                db.pendingOfferDao().insert(
+                    PendingOffer(
+                        milestoneKey = key,
+                        title = tpl.title, description = tpl.description,
+                        goldCost = tpl.goldCost, crystalCost = tpl.crystalCost,
+                        rewardType = tpl.rewardType, rewardPayload = tpl.payload,
+                        generatedAt = now, expiresAt = now + PendingOffer.WINDOW_MS
+                    )
+                )
+            }
+        }
+    }
+
+    fun claimOffer(offerId: Long) = viewModelScope.launch(Dispatchers.IO) {
+        milestoneMutex.withLock {
+            db.withTransaction {
+                val offer = db.pendingOfferDao().getById(offerId) ?: return@withTransaction
+                if (offer.isClaimed || offer.isDeclined) return@withTransaction
+                val now = System.currentTimeMillis()
+                if (offer.expiresAt < now) return@withTransaction
+                if (offer.expiresAt > now + PendingOffer.WINDOW_MS + 3_600_000L) {
+                    db.pendingOfferDao().markDeclined(offer.id)
+                    return@withTransaction
+                }
+
+                val p = db.playerDao().getPlayerProfileOnce() ?: return@withTransaction
+                if (p.gold < offer.goldCost || p.manaCrystals < offer.crystalCost) {
+                    _celebrationEvent.value = "Insufficient currency."
+                    return@withTransaction
+                }
+
+                db.playerDao().updateProfile(
+                    p.copy(
+                        gold = p.gold - offer.goldCost,
+                        manaCrystals = p.manaCrystals - offer.crystalCost
+                    )
+                )
+
+                when (offer.rewardType) {
+                    "EQUIPMENT" -> {
+                        com.example.data.MilestoneRewards.buildEquipment(offer.rewardPayload)?.let {
+                            db.equipmentDao().insertEquipment(it.copy(id = 0))
+                        }
+                    }
+                    "CONSUMABLE_BUNDLE" -> {
+                        offer.rewardPayload.split(",").forEach { part ->
+                            val (itemId, countStr) = part.split(":")
+                            val count = countStr.toIntOrNull() ?: 1
+                            val existing = db.consumableDao().getOne(itemId)
+                            db.consumableDao().upsert(
+                                Consumable(itemId, (existing?.count ?: 0) + count)
+                            )
+                        }
+                    }
+                    "CRYSTALS" -> {
+                        val amount = offer.rewardPayload.toIntOrNull() ?: 0
+                        db.playerDao().updateProfile(p.copy(manaCrystals = p.manaCrystals + amount))
+                    }
+                }
+
+                db.pendingOfferDao().markClaimed(offer.id)
+                _celebrationEvent.value = "CLAIMED: ${offer.title}"
+            }
+        }
+    }
+
+    fun declineOffer(offerId: Long) = viewModelScope.launch(Dispatchers.IO) {
+        milestoneMutex.withLock { db.pendingOfferDao().markDeclined(offerId) }
+    }
+
+    private fun checkMilestonesAfterLevelUp() = viewModelScope.launch(Dispatchers.IO) {
+        milestoneMutex.withLock { checkMilestones() }
     }
 }
