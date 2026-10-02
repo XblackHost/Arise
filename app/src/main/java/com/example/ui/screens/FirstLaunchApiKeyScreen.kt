@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent

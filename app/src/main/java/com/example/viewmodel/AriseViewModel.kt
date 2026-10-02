@@ -10,6 +10,7 @@ import com.example.data.DungeonBoss
 import com.example.data.HunterRadarManager
 import com.example.data.JoinResult
 import com.example.data.LanMultiplayerManager
+import com.example.data.seedInitialDataDirect
 import com.example.data.model.*
 import com.example.security.ApiKeyStorage
 import androidx.room.withTransaction
@@ -178,7 +179,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (db.playerDao().getPlayerProfileOnce() == null) {
-                    AriseDatabase.seedInitialDataDirect(db)
+                    seedInitialDataDirect(db)
                 }
             } catch (e: Exception) {
                 Log.w("AriseViewModel", "Database initial seed error: ${e.message}", e)
@@ -903,7 +904,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             shadowList[targetShadowIndex] = reconResult.updatedShadow
             playerMpAfterAction -= reconResult.consumedMp
 
-            val useReviveCharm = hasConsumable("cons_revive")
+            val useReviveCharm = (consumables.value.find { it.itemId == "cons_revive" }?.count ?: 0) > 0
             if (reconResult.didReconstitute) {
                 actionLogs.add("💥 ${boss.name} delivered a fatal strike of $bossDmgToShadow damage to [${target.name}]!")
                 actionLogs.add("🌑 PASSIVE RECONSTITUTION: [${target.name}] consumed ${reconResult.consumedMp} MP from Hunter and immediately regenerated from the dark mist with full HP! 'ARISE!'")
@@ -1506,6 +1507,10 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ----------------------------------------------------
+    // TASK MANAGEMENT
+    // ----------------------------------------------------
+
     fun addCustomTask(title: String, note: String, stat: String) {
         viewModelScope.launch(Dispatchers.IO) {
             db.taskDao().insertTask(
@@ -1755,12 +1760,6 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    suspend fun consumeOneSuspend(consumableId: String): Boolean =
-        withContext(Dispatchers.IO) { db.consumableDao().decrement(consumableId) > 0 }
-
-    fun hasConsumable(consumableId: String): Boolean =
-        consumables.value.find { it.itemId == consumableId }?.count?.let { it > 0 } ?: false
-
     // Vow-streak based shop discount that equipped gear can boost
     fun permanentShopDiscount(): Int {
         val gear = equipment.value.filter { it.isEquipped }
@@ -1806,26 +1805,6 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     generatedAt = now, expiresAt = now + PendingOffer.WINDOW_MS
                 )
             )
-        }
-    }
-
-    fun flagMilestone(key: String) = viewModelScope.launch(Dispatchers.IO) {
-        milestoneMutex.withLock {
-            if (db.milestoneDao().hasFired(key)) return@withLock
-            val tpl = com.example.data.MilestoneOffers.byKey[key] ?: return@withLock
-            val now = System.currentTimeMillis()
-            db.withTransaction {
-                db.milestoneDao().log(MilestoneLog(key, now))
-                db.pendingOfferDao().insert(
-                    PendingOffer(
-                        milestoneKey = key,
-                        title = tpl.title, description = tpl.description,
-                        goldCost = tpl.goldCost, crystalCost = tpl.crystalCost,
-                        rewardType = tpl.rewardType, rewardPayload = tpl.payload,
-                        generatedAt = now, expiresAt = now + PendingOffer.WINDOW_MS
-                    )
-                )
-            }
         }
     }
 

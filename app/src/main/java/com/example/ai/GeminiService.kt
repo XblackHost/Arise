@@ -69,8 +69,6 @@ Give concise, punchy, motivating, and actionable responses. When asked for advic
             )
         }
 
-        var lastException: Exception? = null
-
         // Try candidate models in order of responsiveness
         for (model in CANDIDATE_MODELS) {
             try {
@@ -128,17 +126,13 @@ Give concise, punchy, motivating, and actionable responses. When asked for advic
                         )
                     }
                     Log.w(TAG, "Model $model returned HTTP ${response.code}, attempting fallback...")
-                    lastException = Exception("Model $model returned HTTP ${response.code}")
                 }
             } catch (e: SocketTimeoutException) {
                 Log.w(TAG, "Model $model socket timeout after 25s, attempting fallback model...")
-                lastException = e
             } catch (e: IOException) {
                 Log.w(TAG, "Model $model network IO error: ${e.message}, attempting fallback model...")
-                lastException = e
             } catch (e: Exception) {
                 Log.w(TAG, "Model $model encountered error: ${e.message}")
-                lastException = e
             }
         }
 

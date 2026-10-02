@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -191,7 +192,8 @@ fun InteractiveQuestCard(
 ) {
     var timerRunning by remember(quest.id) { mutableStateOf(quest.isTimerActive) }
     var secondsLeft by remember(quest.id) { mutableStateOf(quest.timerSecondsRemaining) }
-    val consumables by (viewModel?.consumables ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsState()
+    val consumablesFlow = viewModel?.consumables ?: remember { kotlinx.coroutines.flow.MutableStateFlow(emptyList()) }
+    val consumables by consumablesFlow.collectAsState()
 
     LaunchedEffect(timerRunning, quest.id) {
         var tick = 0
