@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AriseDatabase
+import com.example.data.seedInitialDataDirect
 import com.example.security.ApiKeyStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -46,8 +47,8 @@ class ExampleRobolectricTest {
 
     try {
         // Concurrently run seedInitialDataDirect twice to simulate race
-        val job1 = launch(Dispatchers.IO) { AriseDatabase.seedInitialDataDirect(db) }
-        val job2 = launch(Dispatchers.IO) { AriseDatabase.seedInitialDataDirect(db) }
+        val job1 = launch(Dispatchers.IO) { seedInitialDataDirect(db) }
+        val job2 = launch(Dispatchers.IO) { seedInitialDataDirect(db) }
         job1.join()
         job2.join()
 
@@ -73,7 +74,7 @@ class ExampleRobolectricTest {
         .build()
 
     try {
-        AriseDatabase.seedInitialDataDirect(db)
+        seedInitialDataDirect(db)
         // Undeploy all shadows
         val allShadows = db.shadowDao().getAllShadowsOnce()
         allShadows.forEach { s ->
