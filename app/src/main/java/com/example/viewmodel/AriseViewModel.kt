@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.sync.Mutex
@@ -160,6 +161,11 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         .getAllConsumables()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val ownedCosmeticIds: StateFlow<Set<String>> = db.purchaseLogDao()
+        .getAllOnceFlow()
+        .map { list -> list.map { it.itemId }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
     val activeOffers: StateFlow<List<PendingOffer>> = db.pendingOfferDao()
         .getActiveOffers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -191,6 +197,15 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 milestoneMutex.withLock { checkMilestones() }
             } catch (e: Exception) {
                 Log.w("AriseViewModel", "Milestone check error: ${e.message}", e)
+            }
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                delay(5 * 60_000L)   // every 5 minutes
+                try {
+                    db.pendingOfferDao().purgeExpired()
+                } catch (_: Exception) { }
             }
         }
 
@@ -962,6 +977,32 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun useShopElixir() = viewModelScope.launch(Dispatchers.IO) {
+        val current = _battleState.value
+        if (!current.inBattle || current.isVictory || current.isDefeat) return@launch
+        if (db.consumableDao().decrement("cons_elixir") <= 0) return@launch
+
+        val healAmount = 60
+        val newHp = (current.playerCurrentHp + healAmount).coerceAtMost(current.playerMaxHp)
+        _battleState.value = current.copy(
+            playerCurrentHp = newHp,
+            logMessages = current.logMessages + "🧪 Shop Elixir consumed! Restored +$healAmount HP."
+        )
+    }
+
+    fun useShopTonic() = viewModelScope.launch(Dispatchers.IO) {
+        val current = _battleState.value
+        if (!current.inBattle || current.isVictory || current.isDefeat) return@launch
+        if (db.consumableDao().decrement("cons_tonic") <= 0) return@launch
+
+        val restoreAmount = 30
+        val newMp = (current.playerCurrentMp + restoreAmount).coerceAtMost(current.playerMaxMp)
+        _battleState.value = current.copy(
+            playerCurrentMp = newMp,
+            logMessages = current.logMessages + "🧪 Shop Mana Tonic consumed! Restored +$restoreAmount MP."
+        )
+    }
+
     /**
      * Executes the iconic "ARISE" extraction command with dynamic hunter scaling.
      */
@@ -1029,7 +1070,27 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                                 "Shadow Extraction SUCCESSFUL! $unitName has joined your Shadow Army!"
                     )
                     _celebrationEvent.value = "SHADOW EXTRACTION: 'ARISE!' $unitName joined your Legion!"
-                    flagMilestone("first_arise")
+                    viewModelScope.launch(Dispatchers.IO) {
+                        milestoneMutex.withLock {
+                            if (!db.milestoneDao().hasFired("first_arise")) {
+                                val tpl = com.example.data.MilestoneOffers.byKey["first_arise"]
+                                if (tpl != null) {
+                                    val now = System.currentTimeMillis()
+                                    db.milestoneDao().log(com.example.data.model.MilestoneLog("first_arise", now))
+                                    db.pendingOfferDao().insert(
+                                        com.example.data.model.PendingOffer(
+                                            milestoneKey = "first_arise",
+                                            title = tpl.title, description = tpl.description,
+                                            goldCost = tpl.goldCost, crystalCost = tpl.crystalCost,
+                                            rewardType = tpl.rewardType, rewardPayload = tpl.payload,
+                                            generatedAt = now, expiresAt = now + com.example.data.model.PendingOffer.WINDOW_MS
+                                        )
+                                    )
+                                }
+                            }
+                            checkMilestones()
+                        }
+                    }
                 } catch (e: Exception) {
                     _battleState.value = _battleState.value.copy(isExtracted = false)
                     _celebrationEvent.value = "Extraction failed: ${e.message}"
@@ -1197,8 +1258,27 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             if (didLevelUp) {
                 _celebrationEvent.value = "DUNGEON CLEARED & LEVEL UP! Hunter reached Level $newLevel!"
             }
-            flagMilestone("first_boss")
-            checkMilestonesAfterLevelUp()
+            viewModelScope.launch(Dispatchers.IO) {
+                milestoneMutex.withLock {
+                    if (!db.milestoneDao().hasFired("first_boss")) {
+                        val tpl = com.example.data.MilestoneOffers.byKey["first_boss"]
+                        if (tpl != null) {
+                            val now = System.currentTimeMillis()
+                            db.milestoneDao().log(com.example.data.model.MilestoneLog("first_boss", now))
+                            db.pendingOfferDao().insert(
+                                com.example.data.model.PendingOffer(
+                                    milestoneKey = "first_boss",
+                                    title = tpl.title, description = tpl.description,
+                                    goldCost = tpl.goldCost, crystalCost = tpl.crystalCost,
+                                    rewardType = tpl.rewardType, rewardPayload = tpl.payload,
+                                    generatedAt = now, expiresAt = now + com.example.data.model.PendingOffer.WINDOW_MS
+                                )
+                            )
+                        }
+                    }
+                    checkMilestones()
+                }
+            }
         }
     }
 
@@ -1324,13 +1404,14 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
             val p = db.playerDao().getPlayerProfileOnce() ?: playerProfile.value ?: return@launch
             multiplayerManager.performPartyCombatTurn(p, skillType) { xp, gold, crystals ->
                 viewModelScope.launch(Dispatchers.IO) {
+                    var didLevelUp = false
+                    var newLevel = 1
                     db.withTransaction {
                         val prof = db.playerDao().getPlayerProfileOnce() ?: return@withTransaction
                         var newXp = prof.currentXp + xp
-                        var newLevel = prof.level
+                        newLevel = prof.level
                         var newReq = prof.requiredXp
                         var newStatPoints = prof.unallocatedStatPoints
-                        var didLevelUp = false
 
                         while (newXp >= newReq) {
                             newXp -= newReq
@@ -1357,13 +1438,16 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                             "CO-OP RAID CLEARED! +$xp XP, +$gold Gold, +$crystals Crystals awarded to squadron!"
                         }
                     }
+                    if (didLevelUp) {
+                        checkMilestonesAfterLevelUp()
+                    }
                 }
             }
         }
     }
 
-    fun sendPartyEmote(message: String) {
-        val p = playerProfile.value ?: return
+    fun sendPartyEmote(message: String) = viewModelScope.launch(Dispatchers.IO) {
+        val p = db.playerDao().getPlayerProfileOnce() ?: return@launch
         multiplayerManager.sendPartyEmote(p.name, message)
     }
 
@@ -1436,15 +1520,38 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
 
     fun completeTask(task: TaskItem) {
         viewModelScope.launch(Dispatchers.IO) {
+            var didLevelUp = false
+            var newLevel = 1
             db.withTransaction {
                 db.taskDao().markTaskCompleted(task.id)
                 val p = db.playerDao().getPlayerProfileOnce() ?: return@withTransaction
+
+                var newXp = p.currentXp + task.xpReward
+                newLevel = p.level
+                var newReq = p.requiredXp
+                var newPts = p.unallocatedStatPoints
+                while (newXp >= newReq) {
+                    newXp -= newReq
+                    newLevel++
+                    newReq = maxOf((newReq * 1.35).toInt(), newReq + 1).coerceAtMost(Int.MAX_VALUE / 2)
+                    newPts += 3
+                    didLevelUp = true
+                }
+
                 db.playerDao().updateProfile(
                     p.copy(
-                        currentXp = p.currentXp + task.xpReward,
-                        gold = p.gold + task.goldReward
+                        level = newLevel,
+                        currentXp = newXp,
+                        requiredXp = newReq,
+                        unallocatedStatPoints = newPts,
+                        gold = p.gold + task.goldReward,
+                        rank = determineRank(newLevel)
                     )
                 )
+            }
+            if (didLevelUp) {
+                _celebrationEvent.value = "LEVEL UP! Hunter reached Level $newLevel!"
+                checkMilestonesAfterLevelUp()
             }
         }
     }
@@ -1594,8 +1701,9 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                             return@withTransaction
                         }
                     } else if (!item.isConsumable) {
-                        val owned = db.equipmentDao().getAllEquipmentOnce()
-                        if (owned.any { it.name == item.equipment.name }) {
+                        val ownedByName = db.equipmentDao().getAllEquipmentOnce().any { it.name == item.equipment.name }
+                        val ownedByLog = db.purchaseLogDao().isPurchased(item.id)
+                        if (ownedByName || ownedByLog) {
                             _celebrationEvent.value = "Already owned."
                             return@withTransaction
                         }

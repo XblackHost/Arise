@@ -82,6 +82,7 @@ class LanMultiplayerManager(private val context: Context) {
     private var activeSocket: DatagramSocket? = null
 
     private val raidMutex = Mutex()
+    private val emoteMutex = Mutex()
 
     init {
         // Pre-populate with a nearby active local guild party for quick in-person/offline play
@@ -507,10 +508,12 @@ class LanMultiplayerManager(private val context: Context) {
         )
     }
 
-    fun sendPartyEmote(sender: String, message: String) {
-        val party = _currentParty.value ?: return
-        val entry = RaidLogEntry(sender = sender, action = message)
-        _currentParty.value = party.copy(raidLogs = party.raidLogs + entry)
+    suspend fun sendPartyEmote(sender: String, message: String) {
+        emoteMutex.withLock {
+            val party = _currentParty.value ?: return@withLock
+            val entry = RaidLogEntry(sender = sender, action = message)
+            _currentParty.value = party.copy(raidLogs = party.raidLogs + entry)
+        }
     }
 
     private fun startBroadcasting(party: HunterParty) {

@@ -249,6 +249,7 @@ fun ActiveBossCombatView(
     viewModel: AriseViewModel
 ) {
     val state by viewModel.battleState.collectAsState()
+    val consumables by viewModel.consumables.collectAsState()
     val boss = state.currentBoss ?: return
 
     val infiniteTransition = rememberInfiniteTransition()
@@ -688,12 +689,9 @@ fun ActiveBossCombatView(
                     }
                 }
 
-                if (viewModel.hasConsumable("cons_elixir")) {
+                if ((consumables.find { it.itemId == "cons_elixir" }?.count ?: 0) > 0) {
                     Button(
-                        onClick = {
-                            viewModel.executePlayerAttack("HEAL")
-                            viewModel.consumeOne("cons_elixir")
-                        },
+                        onClick = { viewModel.useShopElixir() },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF14532D)),
                         shape = RoundedCornerShape(8.dp)
@@ -702,12 +700,9 @@ fun ActiveBossCombatView(
                     }
                 }
 
-                if (viewModel.hasConsumable("cons_tonic")) {
+                if ((consumables.find { it.itemId == "cons_tonic" }?.count ?: 0) > 0) {
                     Button(
-                        onClick = {
-                            viewModel.executePlayerAttack("TONIC")
-                            viewModel.consumeOne("cons_tonic")
-                        },
+                        onClick = { viewModel.useShopTonic() },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A8A)),
                         shape = RoundedCornerShape(8.dp)

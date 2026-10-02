@@ -31,6 +31,7 @@ import com.example.viewmodel.AriseViewModel
 fun ShopScreen(viewModel: AriseViewModel) {
     val profile by viewModel.playerProfile.collectAsState()
     val owned by viewModel.equipment.collectAsState()
+    val ownedCosmeticIds by viewModel.ownedCosmeticIds.collectAsState()
     val consumables by viewModel.consumables.collectAsState()
     val vow by viewModel.vowState.collectAsState()
     var filter by rememberSaveable { mutableStateOf<ShopCategory?>(null) }
@@ -90,8 +91,11 @@ fun ShopScreen(viewModel: AriseViewModel) {
             }
         }
         items(visible, key = { it.id }) { shopItem ->
-            val isOwned = if (shopItem.isConsumable) false
-                else owned.any { it.name == shopItem.equipment.name }
+            val isOwned = when {
+                shopItem.isConsumable -> false
+                shopItem.isCosmetic -> ownedCosmeticIds.contains(shopItem.id)
+                else -> owned.any { it.name == shopItem.equipment.name }
+            }
             val myCount = if (shopItem.isConsumable && shopItem.consumableId != null)
                 consumables.find { it.itemId == shopItem.consumableId }?.count ?: 0
             else 0

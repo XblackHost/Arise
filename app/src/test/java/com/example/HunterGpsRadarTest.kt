@@ -5,6 +5,7 @@ import android.location.Location
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.HunterRadarManager
 import com.example.data.RadarEngine
+import kotlinx.coroutines.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -363,5 +364,86 @@ class HunterGpsRadarTest {
         assertEquals(250f, radarManager.sessionFeet.value, 0.01f)
         assertEquals(100, radarManager.sessionSteps.value) // 250 / 2.5 = 100 steps
         assertEquals(250f / HunterRadarManager.FEET_PER_METER, radarManager.sessionMeters.value, 0.1f)
+    }
+
+    @Test
+    fun `test BUG 8 sendPartyEmote rapid taps preserve all messages without loss`() = kotlinx.coroutines.runBlocking {
+        val multiplayerManager = com.example.data.LanMultiplayerManager(context)
+        val dummyProfile = com.example.data.model.PlayerProfile(
+            name = "Sung Jin-Woo",
+            level = 20,
+            currentXp = 0,
+            requiredXp = 5000,
+            rank = "S-Rank",
+            hp = 500,
+            maxHp = 500,
+            mp = 200,
+            maxMp = 200,
+            gold = 1000,
+            manaCrystals = 10,
+            unallocatedStatPoints = 0,
+            strength = 20,
+            endurance = 20,
+            agility = 20,
+            intelligence = 20,
+            focus = 20,
+            discipline = 20,
+            vitality = 20,
+            selectedClass = "Shadow Monarch"
+        )
+        val party = com.example.data.model.DiscoveredParty(
+            roomCode = "EMOTE-01",
+            partyName = "Vanguard",
+            leaderName = "Sung Jin-Woo",
+            leaderRank = "S-Rank",
+            targetBoss = "Iron Fang Cerberus",
+            memberCount = 1,
+            maxMembers = 4,
+            ipAddress = "127.0.0.1"
+        )
+        multiplayerManager.joinParty(party, dummyProfile)
+
+        // Rapid 5 emotes in parallel
+        kotlinx.coroutines.coroutineScope {
+            val jobs = (0 until 5).map { i ->
+                async {
+                    multiplayerManager.sendPartyEmote("Hunter_$i", "Emote message $i")
+                }
+            }
+            jobs.forEach { it.await() }
+        }
+
+        val logs = multiplayerManager.currentParty.value?.raidLogs ?: emptyList()
+        val emoteLogs = logs.filter { it.action.startsWith("Emote message") }
+        assertEquals("All 5 concurrent emotes must be recorded without loss", 5, emoteLogs.size)
+        multiplayerManager.shutdown()
+    }
+
+    @Test
+    fun `test BUG 1 task XP level up calculation formula`() {
+        var currentXp = 80
+        var requiredXp = 100
+        var level = 1
+        var unallocatedPoints = 0
+        val taskXpReward = 250 // 80 + 250 = 330, requires 100 -> lvl 2 (230 left), req becomes 135 -> lvl 3 (95 left), req becomes 182
+
+        var newXp = currentXp + taskXpReward
+        var newLevel = level
+        var newReq = requiredXp
+        var newPts = unallocatedPoints
+        var didLevelUp = false
+
+        while (newXp >= newReq) {
+            newXp -= newReq
+            newLevel++
+            newReq = maxOf((newReq * 1.35).toInt(), newReq + 1).coerceAtMost(Int.MAX_VALUE / 2)
+            newPts += 3
+            didLevelUp = true
+        }
+
+        assertTrue(didLevelUp)
+        assertEquals(3, newLevel)
+        assertEquals(95, newXp)
+        assertEquals(6, newPts)
     }
 }

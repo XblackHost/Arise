@@ -191,6 +191,7 @@ fun InteractiveQuestCard(
 ) {
     var timerRunning by remember(quest.id) { mutableStateOf(quest.isTimerActive) }
     var secondsLeft by remember(quest.id) { mutableStateOf(quest.timerSecondsRemaining) }
+    val consumables by (viewModel?.consumables ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsState()
 
     LaunchedEffect(timerRunning, quest.id) {
         var tick = 0
@@ -330,10 +331,10 @@ fun InteractiveQuestCard(
                         Text(if (timerRunning) "PAUSE ($timeStr)" else "START TIMER ($timeStr)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
-                    if (viewModel?.hasConsumable("cons_timerskip") == true) {
+                    if ((consumables.find { it.itemId == "cons_timerskip" }?.count ?: 0) > 0) {
                         OutlinedButton(
                             onClick = {
-                                viewModel.consumeOne("cons_timerskip")
+                                viewModel?.consumeOne("cons_timerskip")
                                 onComplete()
                             },
                             modifier = Modifier.weight(1f),

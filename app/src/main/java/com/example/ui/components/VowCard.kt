@@ -6,6 +6,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -88,8 +92,15 @@ fun VowCard(viewModel: AriseViewModel) {
                 }
             }
             else -> {
-                val hours = v.hoursRemaining()
-                val mins = ((VowState.WINDOW_MS - (System.currentTimeMillis() - v.lastResetAt)) / 60_000L % 60).coerceAtLeast(0L)
+                var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+                LaunchedEffect(v.id) {
+                    while (true) {
+                        kotlinx.coroutines.delay(30_000L)
+                        nowMs = System.currentTimeMillis()
+                    }
+                }
+                val hours = ((VowState.WINDOW_MS - (nowMs - v.lastResetAt)) / 3_600_000L).coerceAtLeast(0L)
+                val mins = (((VowState.WINDOW_MS - (nowMs - v.lastResetAt)) / 60_000L) % 60).coerceAtLeast(0L)
                 Text(
                     "Window closes in ${hours}h ${mins}m.",
                     color = AriseTextPrimary,

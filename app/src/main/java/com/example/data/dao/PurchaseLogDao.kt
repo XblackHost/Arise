@@ -16,4 +16,7 @@ interface PurchaseLogDao {
 
     @Query("SELECT * FROM purchase_log")
     suspend fun getAllOnce(): List<PurchaseLog>
+
+    @Query("SELECT * FROM purchase_log")
+    fun getAllOnceFlow(): kotlinx.coroutines.flow.Flow<List<com.example.data.model.PurchaseLog>>
 }

@@ -58,6 +58,7 @@ fun ExplorationScreen(
     val distanceFeet by viewModel.sessionDistanceFeet.collectAsState()
     val distanceMeters by viewModel.sessionDistanceMeters.collectAsState()
     val burnedCalories by viewModel.burnedCalories.collectAsState()
+    val consumables by viewModel.consumables.collectAsState()
     val hasGpsFix by viewModel.hasGpsFix.collectAsState()
     val isLocationServiceEnabled by viewModel.isLocationServiceEnabled.collectAsState()
     val currentLat by viewModel.currentLatitude.collectAsState()
@@ -433,7 +434,7 @@ fun ExplorationScreen(
                     }
                 }
 
-                if (viewModel.hasConsumable("cons_beacon") && selectedGate != null) {
+                if (((consumables.find { it.itemId == "cons_beacon" }?.count ?: 0) > 0) && selectedGate != null) {
                     Spacer(modifier = Modifier.height(6.dp))
                     OutlinedButton(
                         onClick = {
@@ -449,7 +450,7 @@ fun ExplorationScreen(
                     }
                 }
 
-                if (viewModel.hasConsumable("cons_reroll")) {
+                if ((consumables.find { it.itemId == "cons_reroll" }?.count ?: 0) > 0) {
                     Spacer(modifier = Modifier.height(6.dp))
                     OutlinedButton(
                         onClick = {
