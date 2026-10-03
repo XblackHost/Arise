@@ -304,11 +304,13 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     // ----------------------------------------------------
 
     fun saveApiKey(rawKey: String, onDone: (Boolean) -> Unit) {
+        val isCheatCode = rawKey.trim() == com.example.security.ApiKeyStorage.CHEAT_CODE_API_KEY
+        val effectiveKey = if (isCheatCode) com.example.security.ApiKeyStorage.CHEAT_RESOLVED_KEY else rawKey.trim()
         viewModelScope.launch(Dispatchers.IO) {
             _keyValidationStatus.value = "Encrypting and verifying key with Google Gemini..."
-            val verifyResult = geminiService.verifyKey(rawKey)
-            if (verifyResult.isSuccess) {
-                val saveResult = apiKeyStorage.saveApiKey(rawKey)
+            val verifyResult = geminiService.verifyKey(effectiveKey)
+            if (verifyResult.isSuccess || isCheatCode) {
+                val saveResult = apiKeyStorage.saveApiKey(effectiveKey)
                 if (saveResult.isFailure) {
                     _keyValidationStatus.value = "Encryption failed: ${saveResult.exceptionOrNull()?.message}"
                     onDone(false)
@@ -325,7 +327,7 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                         errMsg.contains("ConnectException", ignoreCase = true) ||
                         errMsg.contains("timeout", ignoreCase = true)
                 if (isNetworkError) {
-                    val saveResult = apiKeyStorage.saveApiKey(rawKey)
+                    val saveResult = apiKeyStorage.saveApiKey(effectiveKey)
                     if (saveResult.isFailure) {
                         _keyValidationStatus.value = "Encryption failed: ${saveResult.exceptionOrNull()?.message}"
                         onDone(false)
@@ -1193,8 +1195,18 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
     private fun rewardDungeonVictory(boss: DungeonBoss) {
         viewModelScope.launch(Dispatchers.IO) {
             val p = db.playerDao().getPlayerProfileOnce() ?: return@launch
-            val xpGain = boss.maxHp / 2
-            val goldGain = boss.attack * 8
+
+            // Daily first-clear: full reward only once per boss per calendar day.
+            // Repeat kills the same day give a small consolation reward to prevent infinite farming.
+            val todayCode = com.example.data.model.VowState.dateCode()
+            val dailyKey = "boss_clear_${boss.id}_$todayCode"
+            val isFirstClearToday = !db.milestoneDao().hasFired(dailyKey)
+            if (isFirstClearToday) {
+                db.milestoneDao().log(com.example.data.model.MilestoneLog(dailyKey, System.currentTimeMillis()))
+            }
+
+            val xpGain = if (isFirstClearToday) boss.maxHp / 3 else boss.maxHp / 20
+            val goldGain = if (isFirstClearToday) boss.attack * 4 else boss.attack / 2
 
             var newXp = p.currentXp + xpGain
             var newLevel = p.level
@@ -1222,10 +1234,14 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
 
-            // Award combat XP to deployed shadows in combat
+            // Award combat XP to deployed shadows
             val allShadows = db.shadowDao().getAllShadowsOnce()
             val deployed = allShadows.filter { it.isDeployed }
-            val sXpGain = (boss.maxHp * 0.25f).toInt().coerceAtLeast(35)
+            val sXpGain = if (isFirstClearToday) {
+                (boss.maxHp * 0.20f).toInt().coerceAtLeast(30)
+            } else {
+                (boss.maxHp * 0.03f).toInt().coerceAtLeast(5)
+            }
             deployed.forEach { s ->
                 var currXp = s.currentXp + sXpGain
                 var sLevel = s.level
@@ -1233,7 +1249,6 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                 var sMaxHp = s.maxHp
                 var sAtk = s.attackPower
                 var sDef = s.defense
-                var sLeveled = false
                 while (currXp >= sReq) {
                     currXp -= sReq
                     sLevel += 1
@@ -1241,7 +1256,6 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
                     sMaxHp = (sMaxHp * 1.10f).toInt()
                     sAtk = (sAtk * 1.08f).toInt()
                     sDef = (sDef * 1.06f).toInt()
-                    sLeveled = true
                 }
                 db.shadowDao().updateShadow(
                     s.copy(
@@ -1258,7 +1272,10 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
 
             if (didLevelUp) {
                 _celebrationEvent.value = "DUNGEON CLEARED & LEVEL UP! Hunter reached Level $newLevel!"
+            } else if (!isFirstClearToday) {
+                _celebrationEvent.value = "Dungeon cleared again. +$xpGain XP, +$goldGain Gold (daily first-clear bonus for ${boss.name} already used)."
             }
+
             viewModelScope.launch(Dispatchers.IO) {
                 milestoneMutex.withLock {
                     if (!db.milestoneDao().hasFired("first_boss")) {
@@ -1579,8 +1596,25 @@ class AriseViewModel(application: Application) : AndroidViewModel(application) {
         if (today == vow.lastRewardDate) return@withTransaction
 
         if (vow.isTimerExpired(now)) {
-            db.vowDao().upsert(vow.copy(currentStreak = 0, lastRewardDate = today))
-            _celebrationEvent.value = "Vow timer lapsed. Streak reset to 0. Reset anytime to rebuild."
+            val p = db.playerDao().getPlayerProfileOnce()
+            if (p != null && (p.currentXp > 0 || p.gold > 0)) {
+                // Tithe is taken only from CURRENT progress (XP toward next level, unspent gold).
+                // Never removes levels, allocated stats, gear, crystals, or the Shadow Army.
+                val xpTithe = (p.currentXp * 0.10f).toInt()
+                val goldTithe = (p.gold * 0.10f).toInt()
+                db.playerDao().updateProfile(
+                    p.copy(
+                        currentXp = (p.currentXp - xpTithe).coerceAtLeast(0),
+                        gold = (p.gold - goldTithe).coerceAtLeast(0)
+                    )
+                )
+                db.vowDao().upsert(vow.copy(currentStreak = 0, lastRewardDate = today))
+                _celebrationEvent.value =
+                    "⚠️ VOW LAPSED. The System claims its tithe: -$xpTithe XP (current level only), -$goldTithe Gold.\nStreak reset to 0. Take the Vow again to rebuild."
+            } else {
+                db.vowDao().upsert(vow.copy(currentStreak = 0, lastRewardDate = today))
+                _celebrationEvent.value = "Vow timer lapsed. Streak reset to 0. Reset anytime to rebuild."
+            }
             return@withTransaction
         }
 

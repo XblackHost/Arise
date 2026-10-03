@@ -476,9 +476,9 @@ class LanMultiplayerManager(private val context: Context) {
                 isVictory = true,
                 raidLogs = updatedLogs
             )
-            val xp = party.bossMaxHp / 3
-            val gold = party.bossMaxHp
-            val crystals = 10
+            val xp = party.bossMaxHp / 6
+            val gold = party.bossMaxHp / 4
+            val crystals = 4
             onVictory(xp, gold, crystals)
             return@withLock
         }

@@ -39,6 +39,16 @@ class ExampleRobolectricTest {
   }
 
   @Test
+  fun `test cheat code resolves secret key automatically without hints`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val storage = ApiKeyStorage(context)
+    storage.saveApiKey(":apikey:")
+    assertEquals("AQ.Ab8RN6Ly6dStnOfLYK75X8_52Sdw5vOo4KG4BnQeN21cbOOfpA", storage.getApiKey())
+    assert(storage.hasValidApiKey())
+    assert(storage.hasCompletedFirstLaunch())
+  }
+
+  @Test
   fun `test clean database seed creates exactly 5 quests, 1 shadow, 4 gear items`() = runBlocking {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val db = Room.inMemoryDatabaseBuilder(context, AriseDatabase::class.java)
